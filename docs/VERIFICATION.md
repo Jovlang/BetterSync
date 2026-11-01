@@ -11,9 +11,9 @@ Automated coverage includes three-client create/modify/rename/delete with each d
 
 Tests use in-memory vaults and a revision-checking CouchDB model. They do not establish behavior of Obsidian's actual events, editor buffers, trash, filesystem naming rules or iOS suspension.
 
-## Authored, not run here
+## Passed in GitHub Actions
 
-`tests/couchdb.integration.ts` connects three engine instances to a real disposable CouchDB server. The GitHub Actions workflow provisions that server, runs the checks/build, runs the wire integration test, and uploads installable plugin files. This environment has no Docker/CouchDB runtime, so the real-server test was not executed here. CI execution and the real-server result are recorded separately in GitHub Actions.
+`tests/couchdb.integration.ts` connects three engine instances to a real disposable CouchDB server. The GitHub Actions workflow provisions that server, runs the checks/build, runs the wire integration test, and uploads installable plugin files. The original local build environment has no Docker/CouchDB runtime, so this test ran on GitHub's runner. [Verify run 41327984653](https://github.com/Jovlang/BetterSync/actions/runs/41327984653) completed successfully for commit `377fa67f9452c15d86b8f92be46dfc3019523d36`: clean dependency install, strict checks, all 45 tests, build, real CouchDB wire integration and artifact upload all passed. The `bettersync-plugin` artifact contains `main.js` and `manifest.json`.
 
 ## Outstanding release gates
 
@@ -23,4 +23,4 @@ Known API limit: guarded deletion is a read followed by Obsidian's asynchronous 
 
 ## Repository
 
-The user created the private `Jovlang/BetterSync` GitHub repository during implementation. The source, tests and build workflow are prepared for its `main` branch. See GitHub Actions for actual remote run results; an authored workflow is not itself evidence that CI passed.
+The user created the private `Jovlang/BetterSync` GitHub repository during implementation. The source, tests and build workflow are committed on its `main` branch. The successful run and installable artifact are linked above.

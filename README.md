@@ -2,12 +2,12 @@
 
 Small Obsidian plugin for synchronizing Markdown notes through one self-hosted CouchDB database. Designed for desktop, laptop and phone, with no master client and no device registry.
 
-**Status: implemented MVP candidate, not yet device-validated.** The automated suite exercises three independent sync engines, including offline edits, conflicts and restart recovery. The ten acceptance tests on real desktop, MacBook and iPhone clients remain the release gate. No actual Obsidian client or live CouchDB server was available in the build environment.
+**Status: implemented MVP candidate, not yet device-validated.** The automated suite exercises three independent sync engines, including offline edits, conflicts and restart recovery. The ten acceptance tests on real desktop, MacBook and iPhone clients remain the release gate. No actual Obsidian client was available in the build environment. A real CouchDB integration test subsequently passed in GitHub Actions.
 
 ## Install the test build
 
 1. Use a disposable test vault and a dedicated, empty CouchDB database.
-2. Copy `main.js` and `manifest.json` into `<vault>/.obsidian/plugins/bettersync/` on each device. Reload Obsidian and enable BetterSync under Community plugins. The release ZIP has the correct `bettersync/` folder.
+2. Copy `main.js` and `manifest.json` into `<vault>/.obsidian/plugins/bettersync/` on each device. Reload Obsidian and enable BetterSync under Community plugins. The Actions artifact contains these two files; create the `bettersync/` plugin folder yourself.
 3. Enter the HTTPS server URL, database, username and password. Test the connection, then enable Sync.
 4. On the device containing your notes, confirm **Upload**. Start the other devices with empty Markdown vaults and confirm **Download**.
 5. Run [the three-device acceptance checklist](docs/ACCEPTANCE.md).
@@ -51,7 +51,7 @@ GitHub Actions additionally starts a disposable CouchDB service and runs:
 BETTERSYNC_TEST_SERVER=http://localhost:5984 npm run test:integration
 ```
 
-The integration test expects an isolated test server with the test-only account defined in the workflow. It creates and removes its own timestamped database. It uses three real engine instances and real CouchDB HTTP, with simulated vaults. **That test has been authored but was not run in the original build environment.** It is separate from the manual Obsidian acceptance gate.
+The integration test expects an isolated test server with the test-only account defined in the workflow. It creates and removes its own timestamped database. It uses three real engine instances and real CouchDB HTTP, with simulated vaults. **That test passed in [GitHub Actions](https://github.com/Jovlang/BetterSync/actions/runs/41327984653).** It is separate from the manual Obsidian acceptance gate.
 
 ## Source layout
 
