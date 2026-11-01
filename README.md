@@ -1,0 +1,2 @@
+# BetterSync
+LiveSync alternative
