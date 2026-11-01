@@ -15,6 +15,12 @@ Tests use in-memory vaults and a revision-checking CouchDB model. They do not es
 
 `tests/couchdb.integration.ts` connects three engine instances to a real disposable CouchDB server. The GitHub Actions workflow provisions that server, runs the checks/build, runs the wire integration test, and uploads installable plugin files. The original local build environment has no Docker/CouchDB runtime, so this test ran on GitHub's runner. [Verify run 41327984653](https://github.com/Jovlang/BetterSync/actions/runs/41327984653) completed successfully for commit `377fa67f9452c15d86b8f92be46dfc3019523d36`: clean dependency install, strict checks, all 45 tests, build, real CouchDB wire integration and artifact upload all passed. The `bettersync-plugin` artifact contains `main.js` and `manifest.json`.
 
+## Safety fixes verified locally — 1 November 2026
+
+`npm run verify` passes strict TypeScript checks, all 51 automated tests, and the browser-targeted plugin build. New three-client regressions cover failed journal persistence across repeated polls, recovery before filesystem effects, and restart replay for both replacement and deletion. Adapter tests exercise the real vault adapter with simulated Obsidian host classes, checking that unsaved contents in either of two panes defer replacement and deletion, then permit application once both buffers match disk.
+
+The real CouchDB integration test was not rerun for these fixes. The user reports sync working across iPhone, Mac and Windows; the detailed ten-scenario acceptance checklist has not been recorded, and these fixes still need real-device verification.
+
 ## Outstanding release gates
 
 All ten three-real-device acceptance scenarios in `ACCEPTANCE.md` remain NOT RUN. Desktop, MacBook, iPhone, a configured HTTPS CouchDB server, and their credentials were not available for those checks.
