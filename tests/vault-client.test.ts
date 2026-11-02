@@ -23,6 +23,8 @@ test('portable adapter inventories hidden files, preserves bytes, defers nonempt
     mkdir:async(p:string)=>{entries.set(p,null);},
     readBinary:async(p:string)=>{binaryReads++;return entries.get(p);},
     writeBinary:async(p:string,b:ArrayBuffer)=>{entries.set(p,b);},
+    copy:async(from:string,to:string)=>{if(entries.has(to))throw new Error('Exists');entries.set(to,entries.get(from)!);},
+    remove:async(p:string)=>{entries.delete(p);},
     rmdir:async(p:string)=>{entries.delete(p);},
     trashLocal:async(p:string)=>{entries.delete(p);}
   };

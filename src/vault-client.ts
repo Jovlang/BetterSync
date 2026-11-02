@@ -1,4 +1,4 @@
-import {TFile, TFolder, MarkdownView, type App} from 'obsidian';
+import {TFile, MarkdownView, type App} from 'obsidian';
 import {hash, markdown, syncPath, MAX_FILE_BYTES, encodeBinary, decodeBinary, validateContent} from './paths';
 import type {VaultClient} from './types';
 export class ObsidianVault implements VaultClient {
@@ -37,8 +37,10 @@ export class ObsidianVault implements VaultClient {
     const diskPath=path.endsWith('/')?path.slice(0,-1):path;
     const stat=await this.app.vault.adapter.stat(diskPath);
     if(!stat)return null;
-    if(path.endsWith('/')) {if(stat.type!=='folder')throw new Error('File occupies directory path.');return 'directory';}
-    if(stat.type!=='file')throw new Error('Folder occupies file path.');
+    // Records distinguish file and directory identities at the same OS path.
+    // Replacing one type deletes the old identity; it does not delete the new one.
+    if(path.endsWith('/')) return stat.type==='folder'?'directory':null;
+    if(stat.type!=='file')return null;
     if(stat.size>MAX_FILE_BYTES)throw new Error('File exceeds 200 MiB.');
     if(!markdown(path))return encodeBinary(await this.app.vault.adapter.readBinary(path));
     const file=this.app.vault.getAbstractFileByPath(path);
@@ -59,6 +61,33 @@ export class ObsidianVault implements VaultClient {
       }
     }
   }
+  private recoveryPath(path:string):string {return '.trash/bettersync/'+hash(path);}
+  /** copy refuses an existing destination, unlike an asynchronous raw write. */
+  private async createUnindexed(path:string,content:string):Promise<void> {
+    const adapter=this.app.vault.adapter;
+    const nonce=Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
+    const staging='.trash/bettersync/stage-'+nonce;
+    await this.parents(staging);
+    try {
+      if(markdown(path))await adapter.write(staging,content);
+      else await adapter.writeBinary(staging,decodeBinary(content));
+      await adapter.copy(staging,path);
+    } finally {if(await adapter.exists(staging))await adapter.remove(staging);}
+  }
+  async recoverIncoming(path:string,expected:string|null,preserve:(content:string)=>Promise<void>):Promise<void> {
+    if(path.endsWith('/') || markdown(path))return;
+    const adapter=this.app.vault.adapter,backup=this.recoveryPath(path);
+    if(!await adapter.exists(backup))return;
+    const content=encodeBinary(await adapter.readBinary(backup));
+    // A write just before the rename is now in the recovery file. Preserve it
+    // before clearing that file, even if the remote version is already installed.
+    if(hash(content)!==expected)await preserve(content);
+    if(!await adapter.exists(path)) {
+      try {await adapter.copy(backup,path);}
+      catch(error) {if(!await adapter.exists(path))throw error;}
+    }
+    await adapter.remove(backup);
+  }
   async create(path:string,content:string):Promise<void> {
     if(!syncPath(path)) throw new Error('Unsupported path.');
     validateContent(path,content);
@@ -67,8 +96,7 @@ export class ObsidianVault implements VaultClient {
     await this.parents(target);
     if(path.endsWith('/')) {await this.app.vault.adapter.mkdir(target);return;}
     if(markdown(path) && !path.split('/').some(p=>p.startsWith('.')))await this.app.vault.create(path,content);
-    else if(markdown(path))await this.app.vault.adapter.write(path,content);
-    else await this.app.vault.adapter.writeBinary(path,decodeBinary(content));
+    else await this.createUnindexed(path,content);
   }
   async compareAndSet(path:string,expected:string|null,content:string|null):Promise<boolean> {
     if(!syncPath(path)) throw new Error('Unsupported path.');
@@ -76,14 +104,36 @@ export class ObsidianVault implements VaultClient {
     if(path.endsWith('/') || !markdown(path) || !this.app.vault.getAbstractFileByPath(path)) {
       if(hash(await this.read(path))!==expected)return false;
       const target=path.endsWith('/')?path.slice(0,-1):path;
+      const stat=await this.app.vault.adapter.stat(target);
+      if(stat && (stat.type==='folder')!==path.endsWith('/')) {
+        // A tombstone for the previous type must leave its replacement alone.
+        return content===null;
+      }
       if(content===null) {
         if(!await this.app.vault.adapter.exists(target))return true;
         if(path.endsWith('/')) {const children=await this.app.vault.adapter.list(target);if(children.files.length||children.folders.length)throw new Error('Directory is not empty.');await this.app.vault.adapter.rmdir(target,false);}
         else await this.app.vault.adapter.trashLocal(target);
       } else if(expected===null)await this.create(path,content);
       else if(!path.endsWith('/')) {
-        if(markdown(path))await this.app.vault.adapter.write(path,content);
-        else await this.app.vault.adapter.writeBinary(path,decodeBinary(content));
+        const adapter=this.app.vault.adapter;
+        if(markdown(path)) {
+          let matched=false;
+          await adapter.process(path,current=>{
+            if(hash(current)!==expected)return current;
+            matched=true;return content;
+          });
+          return matched;
+        }
+        const backup=this.recoveryPath(path);
+        await this.parents(backup);
+        if(await adapter.exists(backup))throw new Error('Binary recovery must finish before replacement.');
+        await adapter.rename(path,backup);
+        // The rename captures the actual bytes, including edits since the check.
+        // Leave them journaled for recovery on mismatch, failure or a crash.
+        if(hash(encodeBinary(await adapter.readBinary(backup)))!==expected)return false;
+        try {await this.createUnindexed(path,content);}
+        catch(error) {if(await adapter.exists(path))return false;throw error;}
+        await adapter.remove(backup);
       }
       return true;
     }

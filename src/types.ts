@@ -17,10 +17,12 @@ export interface Remote {
   getChanges(since: Sequence): Promise<RemoteChanges>;
 }
 export interface VaultClient {
+  /** Recover an interrupted binary replacement before inspecting local contents. */
+  recoverIncoming?(path:string, expectedHash:string|null, preserve:(content:string)=>Promise<void>):Promise<void>;
   listFiles(): string[] | Promise<string[]>;
   scanChanges?(): Promise<string[]>;
   read(path: string): Promise<string | null>;
-  /** Must leave a changed file untouched, returning false. */
+  /** A mismatch must retain changed contents, at the path or in recoverIncoming's journaled recovery file. */
   compareAndSet(path: string, expectedHash: string | null, content: string | null): Promise<boolean>;
   create(path: string, content: string): Promise<void>;
 }

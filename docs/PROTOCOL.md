@@ -10,7 +10,7 @@ One document per path:
 
 Path identity is deterministic and case-preserving. Paths are never normalized from server input: traversal, backslashes, absolute paths, `.obsidian` and `.trash` components are rejected. Invalid records are retained in local diagnostics while unrelated valid records continue.
 
-Markdown retains schema 1 and UTF-8 text. Other regular files use schema 2 with base64 content. Directories use schema 2, a trailing slash in their record path, and content `directory`. The trailing slash is removed for filesystem access. File and directory type collisions stay queued rather than overwriting another object. The decoded file limit is 200 MiB. Empty directories are explicit records; deleting a directory waits for its children to reconcile and never recursively deletes local data.
+Markdown retains schema 1 and UTF-8 text. Other regular files use schema 2 with base64 content. Directories use schema 2, a trailing slash in their record path, and content `directory`. The trailing slash is removed for filesystem access. A local file/directory replacement deletes the old record identity and creates the new one. Reading the old identity returns absent; its tombstone never removes the replacement type. Incoming creations wait for the previous object to be reconciled, including when records arrive in creation-before-deletion order. Concurrent incompatible live types stay queued rather than overwriting another object. The decoded file limit is 200 MiB. Empty directories are explicit records; deleting a directory waits for its children to reconcile and never recursively deletes local data.
 
 All clients should be upgraded together: old clients cannot read the expanded protocol.
 
@@ -21,6 +21,8 @@ The database must be exclusive to BetterSync's protocol. Direct administrative p
 ## Local state
 
 Each installation stores a random identity, database binding, opaque changes checkpoint, a per-path last-accepted revision and SHA-256 digest (or null for deletion), and any pending incoming operations. The vault remains the source of local file contents; there is no embedded sync database. Pending incoming operations contain the remote note until the local operation is completed. Metadata is stored in Obsidian's local plugin data, which is never synchronized by BetterSync.
+
+Path dictionaries have null prototypes, restored whenever state is loaded or cloned into a new store. Filenames such as `constructor` and `__proto__` are ordinary own entries and survive JSON persistence.
 
 The baseline detects modifications or deletes made while the plugin was disabled or the app was closed. Startup inventories paths once; normal file events queue only the affected paths. A portable stat inventory additionally discovers hidden entries and missed events. Folder renames/deletions queue their tracked descendants.
 
@@ -58,7 +60,13 @@ Obsidian exposes no atomic compare-and-trash operation. Remote deletes recheck d
 
 Filesystem name equivalence differs between Linux, macOS and iOS. Case-only collisions and Unicode normalization collisions need testing on the target vaults. Invalid or unwriteable notes stay queued rather than authorizing an overwrite.
 
-Binary and unindexed-file replacements use a digest check followed by the portable adapter write; Obsidian provides no atomic binary compare-and-set. Concurrent edits during that asynchronous write window require real-device validation, as does peak memory use near 200 MiB. Hidden-file and binary deletes retain contents in local trash. Directory deletes only remove empty directories.
+Unindexed Markdown replacements use `DataAdapter.process` to check the digest inside an atomic text update. Binary replacements use the already-persisted incoming operation plus a recovery file at `.trash/bettersync/<SHA-256 of path>`:
+
+1. Move the existing file into that recovery path, then verify the captured bytes. An edit between the initial read and the move is retained there and causes a retry.
+2. Stage the desired bytes separately and install them using `DataAdapter.copy`, whose contract rejects an existing destination. A local file recreated during installation is therefore not overwritten.
+3. Remove the recovery file only after installation succeeds. Before every incoming retry, including before accepting an already-matching file, inspect any recovery file. Preserve divergent bytes in a normal synced conflict copy, restore the original path if absent using a non-overwriting copy, and then clear recovery.
+
+New unindexed files and conflict copies also use staged, non-overwriting copies. Staging files are removed in normal error/success cleanup; an abrupt process termination may leave disposable staging bytes in local `.trash`. Recovery files must remain until their incoming operations finish. This requires temporary disk space for the old file and staged incoming bytes. These portable API guarantees and behavior of external writers holding open file handles still require real-device validation, as does peak memory use near 200 MiB. Hidden-file and binary deletes retain contents in local trash. Directory deletes only remove empty directories.
 
 ## Failure scope
 

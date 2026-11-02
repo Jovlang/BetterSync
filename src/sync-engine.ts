@@ -145,6 +145,11 @@ export class SyncEngine {
     const {doc,expected}=operation;
     const desired=doc.deleted ? null : doc.content;
     for(let attempt=0;attempt<8;attempt++) {
+      await this.vault.recoverIncoming?.(path,expected,async content=>{
+        this.dirty.add(await preserveConflict(this.vault,path,content,state.clientId));
+        this.hadConflict=true;
+        this.ui.notice(`Sync conflict in ${path}. Both versions were kept.`);
+      });
       const local=await this.vault.read(path), current=hash(local);
       if(current===hash(desired)) {await this.accept(doc);return;}
       if(current!==expected) {

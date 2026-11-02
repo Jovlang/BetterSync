@@ -46,3 +46,37 @@ test('binary incoming journal survives crash before and after local application'
     assert.equal(b.vault.files.size,1);
   }
 });
+
+test('prototype-named files sync, conflict, delete and survive JSON reload on three clients',async()=>{
+  const {a,b,c,remote}=await three();
+  const paths=['constructor','toString','__proto__'];
+  for(const path of paths)await a.vault.edit(path,'AQID');
+  await settle(a,b,c);
+  for(const d of [a,b,c])for(const path of paths)assert.equal(await d.vault.read(path),'AQID');
+  for(const path of paths)await a.vault.edit(path,'BAUG');
+  await settle(a,c);
+  for(const path of paths)await b.vault.edit(path,'BwgJ');
+  b.disk=JSON.parse(JSON.stringify(b.disk));await b.restart();await settle(a,b,c);
+  for(const d of [a,b,c])for(const path of paths) {
+    assert.equal(await d.vault.read(path),'BAUG');
+    assert.ok([...d.vault.files].some(([p,v])=>p.startsWith(path+'.sync-conflict-') && v==='BwgJ'));
+    assert.ok(Object.hasOwn(d.disk.files,path));
+  }
+  for(const path of paths)await a.vault.edit(path,null);
+  await settle(a,c);b.disk=JSON.parse(JSON.stringify(b.disk));await b.restart();await settle(a,b,c);
+  for(const path of paths) {
+    assert.equal(remote.docs.get(path)?.deleted,true);
+    for(const d of [a,b,c])assert.equal(await d.vault.read(path),null);
+  }
+});
+
+test('__proto__ incoming journal persists and replays after a filesystem failure',async()=>{
+  const {a,b,c}=await three();
+  await a.vault.edit('__proto__','AQID');await a.tick();
+  b.vault.failPath='__proto__';await b.tick();
+  const saved=JSON.parse(JSON.stringify(b.disk));
+  assert.ok(Object.hasOwn(saved.incoming,'__proto__'));
+  b.disk=saved;b.vault.failPath=undefined;await b.restart();await settle(a,b,c);
+  assert.equal(await b.vault.read('__proto__'),'AQID');
+  assert.deepEqual(Object.keys(b.disk.incoming),[]);
+});
