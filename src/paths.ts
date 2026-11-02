@@ -1,6 +1,12 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
-export function hash(content: string | null): string | null {
+export function hash(content: string | ArrayBuffer | null): string | null {
+  if(content instanceof ArrayBuffer) {
+    // Retain legacy baseline/conflict digests without allocating a full base64 string.
+    const digest=sha256.create(), bytes=new Uint8Array(content), encoder=new TextEncoder();
+    for(let i=0;i<bytes.length;i+=32766) digest.update(encoder.encode(btoa(String.fromCharCode(...bytes.subarray(i,i+32766)))));
+    return bytesToHex(digest.digest());
+  }
   return content === null ? null : bytesToHex(sha256(new TextEncoder().encode(content)));
 }
 export function markdown(path: string): boolean {
@@ -22,7 +28,13 @@ export function decodeBinary(content:string):ArrayBuffer {
   for(let i=0;i<content.length;i+=32768) {const part=atob(content.slice(i,i+32768));for(let j=0;j<part.length;j++)bytes[offset++]=part.charCodeAt(j);}
   return bytes.buffer;
 }
-export function validateContent(path:string,content:string):void {
+export function rawHash(bytes:ArrayBuffer):string {return bytesToHex(sha256(new Uint8Array(bytes)));}
+export function validateContent(path:string,content:string|ArrayBuffer):void {
+  if(content instanceof ArrayBuffer) {
+    if(markdown(path)||path.endsWith('/'))throw new Error('Unexpected binary content.');
+    if(content.byteLength>MAX_FILE_BYTES)throw new Error('File exceeds 200 MiB.');
+    return;
+  }
   if(path.endsWith('/')) {if(content!=='directory')throw new Error('Invalid directory record.');return;}
   if(markdown(path)) {if(new TextEncoder().encode(content).length>MAX_FILE_BYTES)throw new Error('File exceeds 200 MiB.');return;}
   if(content.length>Math.ceil(MAX_FILE_BYTES/3)*4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(content) || content.length%4!==0)throw new Error('Invalid or oversized binary file.');

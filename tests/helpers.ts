@@ -1,19 +1,22 @@
-import {hash} from '../src/paths';
+import {hash,encodeBinary} from '../src/paths';
 import {freshState,StateStore} from '../src/local-state';
 import {SyncEngine} from '../src/sync-engine';
-import {SyncFailure,type Remote,type FileDocument,type RemoteChanges,type Sequence,type VaultClient,type LocalSyncState,type SyncStatus} from '../src/types';
+import {SyncFailure,type Content,type Remote,type FileDocument,type RemoteChanges,type Sequence,type VaultClient,type LocalSyncState,type SyncStatus} from '../src/types';
 export class MemoryRemote implements Remote {
   docs=new Map<string,FileDocument>(); seq=0; offline=false;
+  attachments=new Map<string,ArrayBuffer>();
+  async getAttachment(doc:FileDocument){this.check();const bytes=this.attachments.get(doc._rev!);if(!bytes)throw new Error('Missing attachment');return bytes.slice(0);}
   history:{seq:number;id:string;doc:FileDocument}[]=[];
   beforePut?:()=>Promise<void>;
   check(){if(this.offline) throw new SyncFailure('temporary','Offline');}
   async testConnection(){this.check();}
   async getDocument(path:string){this.check();return structuredClone(this.docs.get(path)??null);}
-  async putDocument(doc:FileDocument):Promise<FileDocument>{
+  async putDocument(doc:FileDocument,bytes?:ArrayBuffer):Promise<FileDocument>{
     this.check();if(this.beforePut){const f=this.beforePut;this.beforePut=undefined;await f();}
     const current=this.docs.get(doc.path);
     if(current?._rev!==doc._rev) throw new SyncFailure('conflict','Changed');
     const saved={...doc,_rev:`${++this.seq}-server`};this.docs.set(doc.path,saved);
+    if(bytes)this.attachments.set(saved._rev,bytes.slice(0));
     this.history.push({seq:this.seq,id:saved._id,doc:structuredClone(saved)});return saved;
   }
   deleteDocument(doc:FileDocument){return this.putDocument({...doc,deleted:true,content:''});}
@@ -29,9 +32,10 @@ export class MemoryVault implements VaultClient {
   beforeCAS?:()=>Promise<void>; failPath?:string;
   listFiles(){return [...this.files.keys()];}
   async read(path:string){return this.files.get(path)??null;}
-  async create(path:string,content:string){if(this.files.has(path)) throw new Error('Exists');this.files.set(path,content);await this.onChange?.(path);}
+  async create(path:string,content:Content){if(content instanceof ArrayBuffer)content=encodeBinary(content);if(this.files.has(path)) throw new Error('Exists');this.files.set(path,content);await this.onChange?.(path);}
   async edit(path:string,content:string|null){if(content===null)this.files.delete(path);else this.files.set(path,content);await this.onChange?.(path);}
-  async compareAndSet(path:string,expected:string|null,content:string|null){
+  async compareAndSet(path:string,expected:string|null,content:Content|null){
+    if(content instanceof ArrayBuffer)content=encodeBinary(content);
     if(this.failPath===path)throw new Error('Write failure');
     if(this.beforeCAS){const f=this.beforeCAS;this.beforeCAS=undefined;await f();}
     if(hash(await this.read(path))!==expected)return false;

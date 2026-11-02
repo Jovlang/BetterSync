@@ -51,8 +51,9 @@ export default class BetterSync extends Plugin {
     const next=this.writes.then(()=>this.saveData(snapshot));this.writes=next.catch(()=>{});return next;
   }
   private client():CouchClient {
-    return new CouchClient(this.settings,withTimeout(async(url,method,headers,body)=>{
+    return new CouchClient(this.settings,withTimeout(async(url,method,headers,body,responseType)=>{
       const response=await requestUrl({url,method,headers,body,throw:false});
+      if(responseType==='binary')return {status:response.status,arrayBuffer:response.arrayBuffer};
       let json:unknown;try{json=response.json;}catch{json=null;}
       return {status:response.status,json};
     }));

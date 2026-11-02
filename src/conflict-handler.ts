@@ -1,7 +1,7 @@
 import {hash} from './paths';
-import type {VaultClient} from './types';
+import type {VaultClient, Content} from './types';
 /** Content-addressed names make crash retries idempotent. Never overwrite a copy. */
-export async function preserveConflict(vault:VaultClient, path:string, content:string, clientId:string):Promise<string> {
+export async function preserveConflict(vault:VaultClient, path:string, content:Content, clientId:string):Promise<string> {
   if(path.endsWith('/')) throw new Error('A directory conflict remains queued for retry.');
   const dot=path.lastIndexOf('.');
   const extension=dot>path.lastIndexOf('/')?path.slice(dot):'';
@@ -10,7 +10,7 @@ export async function preserveConflict(vault:VaultClient, path:string, content:s
   for (let suffix=0; suffix<100; suffix++) {
     const candidate = suffix ? (extension?name.slice(0,-extension.length):name)+`-${suffix}${extension}` : name;
     const existing = await vault.read(candidate);
-    if (existing === content) return candidate;
+    if (hash(existing) === hash(content)) return candidate;
     if (existing === null) {
       try { await vault.create(candidate,content); return candidate; }
       catch (error) { if (await vault.read(candidate) === null) throw error; }

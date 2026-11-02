@@ -1,5 +1,7 @@
 export type Sequence = string | number;
-export interface FileDocument { _id: string; _rev?: string; schema: 1 | 2; path: string; content: string; mtime: number; deleted: boolean }
+export type Content = string | ArrayBuffer;
+export interface Attachment { stub: true; content_type: string; length: number }
+export interface FileDocument { _id: string; _rev?: string; schema: 1 | 2 | 3; path: string; content?: string; mtime: number; deleted: boolean; size?: number; hash?: string; _attachments?: {content: Attachment} }
 export interface Baseline { rev: string; hash: string | null }
 export interface Incoming { doc: FileDocument; expected: string | null }
 export interface LocalSyncState {
@@ -10,21 +12,22 @@ export interface LocalSyncState {
 }
 export interface RemoteChanges { results: {seq: Sequence; id: string; doc?: unknown; deleted?: boolean}[]; last_seq: Sequence; pending?: number }
 export interface Remote {
+  getAttachment(doc: FileDocument): Promise<ArrayBuffer>;
   testConnection(): Promise<void>;
   getDocument(path: string): Promise<FileDocument | null>;
-  putDocument(doc: FileDocument): Promise<FileDocument>;
+  putDocument(doc: FileDocument, bytes?: ArrayBuffer): Promise<FileDocument>;
   deleteDocument(doc: FileDocument): Promise<FileDocument>;
   getChanges(since: Sequence): Promise<RemoteChanges>;
 }
 export interface VaultClient {
   /** Recover an interrupted binary replacement before inspecting local contents. */
-  recoverIncoming?(path:string, expectedHash:string|null, preserve:(content:string)=>Promise<void>):Promise<void>;
+  recoverIncoming?(path:string, expectedHash:string|null, preserve:(content:Content)=>Promise<void>):Promise<void>;
   listFiles(): string[] | Promise<string[]>;
   scanChanges?(): Promise<string[]>;
-  read(path: string): Promise<string | null>;
+  read(path: string): Promise<Content | null>;
   /** A mismatch must retain changed contents, at the path or in recoverIncoming's journaled recovery file. */
-  compareAndSet(path: string, expectedHash: string | null, content: string | null): Promise<boolean>;
-  create(path: string, content: string): Promise<void>;
+  compareAndSet(path: string, expectedHash: string | null, content: Content | null): Promise<boolean>;
+  create(path: string, content: Content): Promise<void>;
 }
 export type SyncStatus = 'Synced' | 'Syncing…' | 'Offline' | 'Conflict' | 'Sync error';
 export type SetupChoice = 'upload' | 'download' | 'cancel';

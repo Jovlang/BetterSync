@@ -30,7 +30,7 @@ test('portable adapter inventories hidden files, preserves bytes, defers nonempt
   };
   const vault=new ObsidianVault({vault:{adapter,getAbstractFileByPath:()=>null}});
   assert.deepEqual(await vault.listFiles(),['.hidden/','.hidden/bytes']);
-  assert.equal(await vault.read('.hidden/bytes'),'AP8=');
+  assert.deepEqual(new Uint8Array(await vault.read('.hidden/bytes')),Uint8Array.from([0,255]));
   await vault.create('empty/','directory');assert.equal(await vault.read('empty/'),'directory');
   await vault.create('empty/attachment.bin','AQID');
   assert.deepEqual(new Uint8Array(entries.get('empty/attachment.bin')!),Uint8Array.from([1,2,3]));

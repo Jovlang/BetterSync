@@ -28,7 +28,7 @@ The normal states are **Synced**, **Syncing…**, **Offline**, **Conflict** and 
 
 ## Server requirements
 
-Use a dedicated CouchDB 3.x database exposed through valid HTTPS, with a database user permitted to read and write notes. For large files, configure CouchDB `couchdb.max_document_size`, `chttpd.max_http_request_size`, and any reverse proxy request limits above 280 MB, allowing additional JSON overhead. Binary content uses base64 and consumes about one third more space in transit; mobile memory limits may constrain practical transfers. Create the database outside this plugin; BetterSync does not create databases, configure CouchDB, or change permissions. The URL can include a reverse-proxy subpath.
+Use a dedicated CouchDB 3.x database exposed through valid HTTPS, with a database user permitted to read and write notes. Binary files use raw CouchDB attachments, uploaded atomically with metadata in a multipart request. Configure `chttpd.max_http_request_size` and reverse proxy request limits above 200 MiB plus multipart overhead. `couchdb.max_document_size` must accommodate Markdown JSON and any existing schema 2 records (which can exceed 267 MiB with base64 and JSON overhead); attachment bytes are separate from the JSON document-size limit. Existing schema 2 binary records remain readable and become schema 3 on their next edit. New binary records appear in the changes feed as small attachment stubs. Transfers are buffered, not streaming: uploads hold both the source bytes and a multipart buffer, and Obsidian may make additional internal copies. Downloads and guarded filesystem operations also require full buffers. The 200 MiB protocol limit is not a promise that a 200 MiB transfer fits in iPhone memory; see [memory constraints](docs/PROTOCOL.md#transport-and-memory). Create the database outside this plugin; BetterSync does not create databases, configure CouchDB, or change permissions. The URL can include a reverse-proxy subpath.
 
 This protocol is independent of LiveSync: **do not point it at a LiveSync database** or run another sync engine against the same test vault. Ordinary CouchDB compaction is fine. Do not purge notes or remove BetterSync's deletion-marker documents: offline clients need those markers.
 
@@ -51,7 +51,7 @@ GitHub Actions additionally starts a disposable CouchDB service and runs:
 BETTERSYNC_TEST_SERVER=http://localhost:5984 npm run test:integration
 ```
 
-The integration test expects an isolated test server with the test-only account defined in the workflow. It creates and removes its own timestamped database. It uses three real engine instances and real CouchDB HTTP, with simulated vaults. **That test passed in [GitHub Actions](https://github.com/Jovlang/BetterSync/actions/runs/41327984653).** It is separate from the manual Obsidian acceptance gate.
+The integration test expects an isolated test server with the test-only account defined in the workflow. It creates and removes its own timestamped database. It uses three real engine instances and real CouchDB HTTP, with simulated vaults. **The original protocol test passed in [GitHub Actions](https://github.com/Jovlang/BetterSync/actions/runs/41327984653).** The attachment-protocol wire test also passed locally against an isolated CouchDB 3.5 container on 3 November 2026, including restore and deletion after compaction. It is separate from the manual Obsidian acceptance gate.
 
 ## Source layout
 

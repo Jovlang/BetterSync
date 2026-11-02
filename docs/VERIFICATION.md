@@ -50,3 +50,9 @@ The real CouchDB integration test was not run: no Docker executable or isolated 
 With Node.js 24.19.0, `npm run verify` passed strict TypeScript checks, all 68 individual tests (none skipped), and the browser build. `BETTERSYNC_TEST_SERVER=http://127.0.0.1:15984 npm run test:integration` passed its real CouchDB three-client test against a disposable CouchDB 3.5 container. This supersedes the earlier local integration availability limitation. The container was removed after testing.
 
 Added configuration-folder regression checks cover inventory exclusion and rejection of reads, creation, replacement/deletion and incoming recovery before filesystem access, including case variants. GPL-3.0-only licensing and the bundled MIT dependency notice are included. Real-device acceptance and verification of the declared minimum Obsidian version remain outstanding. No release has been published by this preparation step.
+
+## Attachment protocol — 3 November 2026
+
+The schema 3 transport uses atomic multipart uploads and revision-qualified raw attachment downloads. Local verification passes strict TypeScript, 81 automated tests (including three-client offline, binary conflict, path/type transition and crash-recovery cases), and the browser-targeted build. The real CouchDB wire suite passed locally against a disposable CouchDB 3.5 Docker container: upload (including empty and 9 MiB attachments), stub-only changes, raw download, clean restore, stale revision rejection, schema 2 upgrade, and attachment removal with deletion-marker discovery after compaction. No user vault database was used.
+
+The ten real desktop/MacBook/iPhone acceptance scenarios remain outstanding. Buffered HTTP memory usage and mobile multipart transport have not been validated on actual Obsidian clients.

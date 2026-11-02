@@ -5,7 +5,7 @@ import type {App} from 'obsidian';
 import type {ObsidianVault as VaultAdapter} from '../src/vault-client';
 import {freshState,StateStore} from '../src/local-state';
 import {SyncEngine} from '../src/sync-engine';
-import {hash} from '../src/paths';
+import {hash,encodeBinary} from '../src/paths';
 import type {SyncStatus} from '../src/types';
 import {MemoryRemote} from './helpers';
 
@@ -116,7 +116,7 @@ for(const direction of ['directory-to-file','file-to-directory'])test(`${directi
   assert.equal(remote.docs.get(newPath)?.deleted,false);
   for(const d of [a,b,c]) {
     assert.equal(await d.vault.read(oldPath),null);
-    assert.equal(await d.vault.read(newPath),wasDirectory?'Ag==':'directory');
+    assert.equal(wasDirectory?encodeBinary(await d.vault.read(newPath) as ArrayBuffer):await d.vault.read(newPath),wasDirectory?'Ag==':'directory');
     assert.deepEqual(Object.keys(d.disk.incoming),[]);
     assert.equal(d.status,'Synced');
   }
@@ -142,10 +142,10 @@ for(const moment of ['before-move','before-install','after-move-crash','after-in
   if(moment==='after-move-crash-remote-present')b.fs.edit('file.bin',[2]);
   await b.restart();await settle(a,b,c);
   for(const d of [a,b,c]) {
-    assert.equal(await d.vault.read('file.bin'),'Ag==');
+    assert.equal(encodeBinary(await d.vault.read('file.bin') as ArrayBuffer),'Ag==');
     const copies=(await d.vault.listFiles()).filter(p=>p.includes('.sync-conflict-'));
     assert.equal(copies.length,1);
-    assert.equal(await d.vault.read(copies[0]!),'CQ==');
+    assert.equal(encodeBinary(await d.vault.read(copies[0]!) as ArrayBuffer),'CQ==');
     assert.deepEqual(Object.keys(d.disk.incoming),[]);
     assert.equal(d.fs.entries.has('.trash/bettersync/'+hash('file.bin')),false);
   }
@@ -171,8 +171,8 @@ test('new binary creation refuses a concurrent local file',async()=>{
   b.fs.beforeCopy=(_from,to)=>{if(to==='new.bin'){b.fs.beforeCopy=undefined;b.fs.edit('new.bin',[9]);}};
   await settle(a,b,c);
   for(const d of [a,b,c]) {
-    assert.equal(await d.vault.read('new.bin'),'Ag==');
+    assert.equal(encodeBinary(await d.vault.read('new.bin') as ArrayBuffer),'Ag==');
     const copies=(await d.vault.listFiles()).filter(p=>p.includes('.sync-conflict-'));
-    assert.equal(copies.length,1);assert.equal(await d.vault.read(copies[0]!),'CQ==');
+    assert.equal(copies.length,1);assert.equal(encodeBinary(await d.vault.read(copies[0]!) as ArrayBuffer),'CQ==');
   }
 });

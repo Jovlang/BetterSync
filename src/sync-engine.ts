@@ -1,8 +1,8 @@
-import {documentId, hash, syncPath, validateContent} from './paths';
+import {decodeBinary, rawHash, documentId, hash, syncPath, validateContent} from './paths';
 import {preserveConflict} from './conflict-handler';
 import {validateDocument} from './couch-client';
 import {StateStore, PersistenceFailure} from './local-state';
-import {SyncFailure, type FileDocument, type Remote, type VaultClient, type EngineUI} from './types';
+import {SyncFailure, type FileDocument, type Remote, type VaultClient, type EngineUI, type Content} from './types';
 
 export class SyncEngine {
   private dirty = new Set<string>();
@@ -143,7 +143,10 @@ export class SyncEngine {
     const operation=state.incoming[path];
     if(!operation) return;
     const {doc,expected}=operation;
-    const desired=doc.deleted ? null : doc.content;
+    const desired:Content|null=doc.deleted ? null : doc.schema===3
+      ? await this.remote.getAttachment(doc)
+      : doc.schema===2 && !path.endsWith('/') && !path.endsWith('.md') ? decodeBinary(doc.content!) : doc.content!;
+    const desiredHash=hash(desired);
     for(let attempt=0;attempt<8;attempt++) {
       await this.vault.recoverIncoming?.(path,expected,async content=>{
         this.dirty.add(await preserveConflict(this.vault,path,content,state.clientId));
@@ -151,7 +154,7 @@ export class SyncEngine {
         this.ui.notice(`Sync conflict in ${path}. Both versions were kept.`);
       });
       const local=await this.vault.read(path), current=hash(local);
-      if(current===hash(desired)) {await this.accept(doc);return;}
+      if(current===desiredHash) {await this.accept(doc,desiredHash);return;}
       if(current!==expected) {
         if(local!==null) {
           const copy=await preserveConflict(this.vault,path,local,state.clientId);
@@ -161,16 +164,16 @@ export class SyncEngine {
         this.ui.notice(`Sync conflict in ${path}. Both versions were kept.`);
         this.ui.log('conflict detected',path);
       }
-      this.expectedRemoteWrites.set(path,hash(desired));
+      this.expectedRemoteWrites.set(path,desiredHash);
       if(await this.vault.compareAndSet(path,current,desired)) {
-        await this.accept(doc);this.ui.log('remote write applied',path);return;
+        await this.accept(doc,desiredHash);this.ui.log('remote write applied',path);return;
       }
       this.expectedRemoteWrites.delete(path);
     }
     throw new SyncFailure('data','This note is changing too quickly. Sync will retry.');
   }
-  private async accept(doc:FileDocument):Promise<void> {
-    this.store.state.files[doc.path]={rev:doc._rev!,hash:hash(doc.deleted?null:doc.content)};
+  private async accept(doc:FileDocument,digest:string|null):Promise<void> {
+    this.store.state.files[doc.path]={rev:doc._rev!,hash:digest};
     delete this.store.state.incoming[doc.path];
     await this.store.save();
   }
@@ -182,10 +185,13 @@ export class SyncEngine {
     const remote=await this.remote.getDocument(path);
     if(remote && remote._rev!==base?.rev) {await this.receive(remote);return;}
     if(!remote && base) throw new SyncFailure('data','A synced note is missing from the server.');
-    const doc:FileDocument={_id:documentId(path),schema:path.endsWith('.md')?1:2,path,content:content??'',deleted:content===null,mtime:Date.now()};
+    const binary=content!==null && !path.endsWith('/') && !path.endsWith('.md');
+    const bytes=binary ? (typeof content==='string'?decodeBinary(content):content!) : undefined;
+    const doc:FileDocument=bytes ? {_id:documentId(path),schema:3,path,deleted:false,mtime:Date.now(),size:bytes.byteLength,hash:rawHash(bytes),_attachments:{content:{stub:true,content_type:'application/octet-stream',length:bytes.byteLength}}}
+      : {_id:documentId(path),schema:path.endsWith('.md')?1:2,path,content:(content??'') as string,deleted:content===null,mtime:Date.now()};
     if(base) doc._rev=base.rev;
     try {
-      const saved=content===null?await this.remote.deleteDocument(doc):await this.remote.putDocument(doc);
+      const saved=content===null?await this.remote.deleteDocument(doc):await this.remote.putDocument(doc,bytes);
       // Record exactly what was uploaded, never a newer local edit made during HTTP.
       this.store.state.files[path]={rev:saved._rev!,hash:digest};
       await this.store.save();

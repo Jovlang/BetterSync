@@ -11,7 +11,7 @@ test('HTTPS, credentials and query-bearing endpoints are validated',()=>{
 });
 test('UTF-8 basic auth, subpath, database and document URLs are encoded correctly',async()=>{
   const requests:{url:string;method:string;headers:Record<string,string>;body?:string}[]=[];
-  const http:Http=async(url,method,headers,body)=>{requests.push({url,method,headers,body});return {status:201,json:{rev:'2-b'}};};
+  const http:Http=async(url,method,headers,body)=>{requests.push({url,method,headers,body:body as string});return {status:201,json:{rev:'2-b'}};};
   const client=new CouchClient({...connection,database:'vault name'},http);await client.putDocument(doc);
   assert.equal(requests[0]?.url,`https://example.com/couch/vault%20name/${encodeURIComponent(doc._id)}`);
   assert.equal(requests[0]?.headers.Authorization,'Basic '+Buffer.from('jöv:påss').toString('base64'));
@@ -27,7 +27,7 @@ test('missing note is distinct from a missing database',async()=>{
   assert.equal(await client.getDocument(doc.path),null);
 });
 test('deletion remains a normal durable document with empty content',async()=>{
-  let body='';const client=new CouchClient(connection,async(_u,_m,_h,b)=>{body=b!;return {status:201,json:{rev:'2-a'}};});
+  let body='';const client=new CouchClient(connection,async(_u,_m,_h,b)=>{body=b as string;return {status:201,json:{rev:'2-a'}};});
   await client.deleteDocument(doc);const sent=JSON.parse(body);assert.equal(sent.deleted,true);assert.equal(sent.content,'');assert.equal(sent._deleted,undefined);
 });
 test('opaque CouchDB checkpoints are round-tripped without parsing',async()=>{
