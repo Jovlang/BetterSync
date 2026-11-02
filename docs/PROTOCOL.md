@@ -40,6 +40,8 @@ There is one running cycle per client. Periodic polls overlap neither themselves
 
 Before writing the vault, save the remote document and the local baseline digest expected by that operation. On replay:
 
+First persist the current incoming queue again. A failed save can leave an operation only in memory; subsequent polls must not apply it until persistence succeeds.
+
 - If the local file already equals the desired remote contents, accept the baseline without rewriting.
 - If it equals the expected baseline, apply the remote version.
 - Otherwise preserve the local text in an ordinary conflict file, then apply the remote version.
@@ -50,7 +52,7 @@ Only after the filesystem operation is successful does the engine save the accep
 
 ## Local writes and editing buffers
 
-`Vault.process` guards replacement of existing text against a changed on-disk digest. The adapter also checks open source-mode editors for a pending buffer that differs from disk and defers remote writes until it is saved. Expected-write markers suppress normal reflected vault events; digest/baseline comparison makes duplicate or delayed events harmless.
+`Vault.process` guards replacement of existing text against a changed on-disk digest. The adapter checks every open source-mode editor for the note and defers remote replacement or deletion if any buffer differs from disk, until those changes are saved. Expected-write markers suppress normal reflected vault events; digest/baseline comparison makes duplicate or delayed events harmless.
 
 Obsidian exposes no atomic compare-and-trash operation. Remote deletes recheck disk and open editing buffers immediately before `Vault.trash(file, false)`, which retains the deleted file in vault trash. A user edit in the final asynchronous deletion window is an outstanding real-device verification concern; trash is the recovery layer. This is a reason the implementation is not certified against the real-device no-data-loss acceptance gate yet.
 

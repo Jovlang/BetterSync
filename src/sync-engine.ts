@@ -42,6 +42,9 @@ export class SyncEngine {
       if(!this.store.state.initialized) {
         if(!await this.initialize()) return;
       }
+      // A failed journal save leaves the operation in memory. Re-establish
+      // durability before replay so a later poll cannot bypass that failure.
+      if(Object.keys(this.store.state.incoming).length) await this.store.save();
       // A persisted incoming operation is completed before advancing any checkpoint.
       let failed=false;
       for(const p of Object.keys(this.store.state.incoming)) {

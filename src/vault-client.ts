@@ -16,12 +16,12 @@ export class ObsidianVault implements VaultClient {
     for(const path of this.inventory.keys())if(!next.has(path))changed.push(path);
     this.inventory=next;return changed;
   }
-  private editingBuffer(path:string):string|undefined {
+  private hasPendingEditorChanges(path:string,disk:string):boolean {
     for(const leaf of this.app.workspace.getLeavesOfType('markdown')) {
       const view=leaf.view;
-      if(view instanceof MarkdownView && view.file?.path===path && view.getMode()==='source') return view.editor.getValue();
+      if(view instanceof MarkdownView && view.file?.path===path && view.getMode()==='source' && view.editor.getValue()!==disk) return true;
     }
-    return undefined;
+    return false;
   }
   async listFiles():Promise<string[]> {
     const result:string[]=[];
@@ -97,14 +97,14 @@ export class ObsidianVault implements VaultClient {
     if(!(file instanceof TFile)) throw new Error('A folder occupies this note path.');
     if(content===null) {
       const disk=await this.app.vault.read(file);
-      if(hash(disk)!==expected || (this.editingBuffer(path)??disk)!==disk) return false;
+      if(hash(disk)!==expected || this.hasPendingEditorChanges(path,disk)) return false;
       // Obsidian has no atomic compare-and-trash API. Retain deleted notes in
       // the vault trash as a final recovery layer; never permanently delete.
       await this.app.vault.trash(file,false);return true;
     }
     let matched=false;
     await this.app.vault.process(file,current=>{
-      if(hash(current)!==expected || (this.editingBuffer(path)??current)!==current) return current;
+      if(hash(current)!==expected || this.hasPendingEditorChanges(path,current)) return current;
       matched=true;return content;
     });
     return matched;

@@ -88,6 +88,27 @@ test('crash after journal save before write resumes without extra conflicts',asy
   assert.ok(b.disk.incoming['test.md']);b.vault.failPath=undefined;await b.restart();await settle(a,b,c);
   assert.equal(await b.vault.read('test.md'),'remote');assert.equal(b.vault.files.size,1);
 });
+for(const deletion of [false,true])test(`failed incoming journal save blocks ${deletion?'deletion':'replacement'} until durable, including after restart`,async()=>{
+  const {a,b,c}=await three();await a.vault.edit('test.md','base');await settle(a,b,c);
+  await a.vault.edit('test.md',deletion?null:'remote');await a.tick();
+  b.saveFailure=true;await b.tick();
+  assert.ok(b.store.state.incoming['test.md']);assert.equal(b.disk.incoming['test.md'],undefined);
+  // Repeated polls must not use the unpersisted in-memory journal.
+  await b.tick();await b.tick();
+  assert.equal(await b.vault.read('test.md'),'base');assert.equal(b.status,'Sync error');
+  b.saveFailure=false;
+  // The retry must save the journal before entering the filesystem operation.
+  b.vault.beforeCAS=async()=>{
+    assert.ok(b.disk.incoming['test.md']);
+    b.saveFailure=true;
+    throw new Error('Simulated crash before filesystem write');
+  };
+  await b.tick();assert.ok(b.disk.incoming['test.md']);assert.equal(await b.vault.read('test.md'),'base');
+  b.saveFailure=false;await b.restart();await settle(a,b,c);
+  for(const d of [a,b,c])assert.equal(await d.vault.read('test.md'),deletion?null:'remote');
+  assert.equal(b.disk.incoming['test.md'],undefined);
+  assert.equal(b.vault.files.size,deletion?0:1);
+});
 test('crash after local write before baseline save replays safely',async()=>{
   const {a,b,c}=await three();await a.vault.edit('test.md','base');await settle(a,b,c);
   await a.vault.edit('test.md','new');await a.tick();
