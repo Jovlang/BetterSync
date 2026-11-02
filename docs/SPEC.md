@@ -22,7 +22,7 @@ Three or more independent Obsidian installations synchronize the same vault thro
 
 ## Excluded
 
-`.obsidian`, local recovery trash (`.trash`), settings, plugins, themes, workspace state, encryption, P2P, WebRTC, S3, alternate backends, device registries, revision-selection UI, automatic text merging, version-history UI, chunks, compression, selective sync, profiles, compatibility modes and LiveSync migration.
+The active Obsidian configuration folder, `.obsidian`, local recovery trash (`.trash`), settings, plugins, themes, workspace state, encryption, P2P, WebRTC, S3, alternate backends, device registries, revision-selection UI, automatic text merging, version-history UI, chunks, compression, selective sync, profiles, compatibility modes and LiveSync migration.
 
 ## Safety rules
 
@@ -48,7 +48,7 @@ All ten scenarios in `ACCEPTANCE.md` must pass on three **real** Obsidian client
 
 ## Small implementation decisions
 
-- Hidden paths synchronize through the portable adapter. `.obsidian` and local recovery `.trash` remain excluded. Filesystem inventory polls detect changes not indexed by Obsidian.
+- Hidden paths synchronize through the portable adapter. The active configuration folder, `.obsidian` and local recovery `.trash` remain excluded. Filesystem inventory polls detect changes not indexed by Obsidian.
 - Renames are a new-path creation and old-path deletion; there is no identity-independent rename model.
 - Conflict names use a short installation ID plus content digest instead of a device name and clock timestamp. This avoids same-minute collisions and duplicate copies after crashes.
 - A local deletion against a newer remote edit preserves the remote contents and reports a conflict; no artificial empty conflict note is created.

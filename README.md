@@ -22,7 +22,7 @@ Create, edit, delete or rename files and directories normally. Sync runs roughly
 
 A concurrent edit preserves the local text in a normal `*.sync-conflict-<client>-<content>.md` file and converges the main path to the server version. Conflict copies also sync to the other devices. They can be compared, edited or removed normally. Deletion against a newer edit keeps the newer remote note; an offline edit against a deletion becomes a conflict copy, leaving the original path deleted.
 
-Regular files (including attachments, Canvas and hidden files) and directories (including empty ones) synchronize. `.obsidian` and the local recovery directory `.trash` are excluded. The fixed per-file limit is 200 MiB (209,715,200 bytes); larger files stay local and report a sync error. Settings, plugins and themes inside `.obsidian` stay local. Remote deletion uses the vault's local trash, never permanent filesystem deletion.
+Regular files (including attachments, Canvas and hidden files) and directories (including empty ones) synchronize. The active Obsidian configuration folder (including custom `Vault.configDir` paths), `.obsidian`, and the local recovery directory `.trash` are excluded. The fixed per-file limit is 200 MiB (209,715,200 bytes); larger files stay local and report a sync error. Settings, plugins and themes inside `.obsidian` stay local. Remote deletion uses the vault's local trash, never permanent filesystem deletion.
 
 The normal states are **Synced**, **Syncing…**, **Offline**, **Conflict** and **Sync error**. Use **Retry** after fixing a connection problem. Connection errors stop automatic aggressive retries; temporary failures are retried. The Conflict indication stays visible for the current plugin session after a conflict occurs; conflict copies remain ordinary files after restart.
 
@@ -70,3 +70,7 @@ See [the implementation contract](docs/SPEC.md), [protocol and crash handling](d
 Source: [Jovlang/BetterSync](https://github.com/Jovlang/BetterSync).
 
 The GitHub Actions workflow builds an installable `bettersync-plugin` artifact containing `main.js` and `manifest.json`. Download it from a successful workflow run and place those files in the vault plugin folder described above.
+
+## License
+
+BetterSync is licensed under GPL-3.0-only. See [LICENSE](LICENSE). Bundled third-party notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

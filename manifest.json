@@ -1,1 +1,9 @@
-{"id":"bettersync","name":"BetterSync","version":"0.1.0","minAppVersion":"1.8.7","description":"Simple Markdown synchronization through your CouchDB server.","author":"Jovlang","isDesktopOnly":false}
+{
+  "id": "bettersync",
+  "name": "BetterSync",
+  "version": "0.1.0",
+  "minAppVersion": "1.8.7",
+  "description": "Synchronize vault files and directories through your CouchDB server.",
+  "author": "Jovlang",
+  "isDesktopOnly": false
+}

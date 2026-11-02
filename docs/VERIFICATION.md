@@ -44,3 +44,9 @@ All ten real desktop/MacBook/iPhone acceptance tests remain outstanding. Expande
 The adapter regressions execute the actual vault adapter against a simulated filesystem with file/directory constraints and Obsidian's documented non-overwriting `copy` contract. Binary replacement now retains displaced bytes in `.trash/bettersync` until installation/recovery completes; unindexed Markdown uses atomic `DataAdapter.process`. These changes supersede the unguarded binary-write limitation recorded in the expanded-scope entry above. Temporary disk space, external open-file writers, filesystem API guarantees on each platform and large-file memory use still require real-device testing.
 
 The real CouchDB integration test was not run: no Docker executable or isolated `BETTERSYNC_TEST_SERVER` is configured in this session. All ten desktop/MacBook/iPhone acceptance scenarios remain outstanding; automated simulations do not establish MVP acceptance.
+
+## Release preparation — 2 November 2026
+
+With Node.js 24.19.0, `npm run verify` passed strict TypeScript checks, all 68 individual tests (none skipped), and the browser build. `BETTERSYNC_TEST_SERVER=http://127.0.0.1:15984 npm run test:integration` passed its real CouchDB three-client test against a disposable CouchDB 3.5 container. This supersedes the earlier local integration availability limitation. The container was removed after testing.
+
+Added configuration-folder regression checks cover inventory exclusion and rejection of reads, creation, replacement/deletion and incoming recovery before filesystem access, including case variants. GPL-3.0-only licensing and the bundled MIT dependency notice are included. Real-device acceptance and verification of the declared minimum Obsidian version remain outstanding. No release has been published by this preparation step.

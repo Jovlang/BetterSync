@@ -4,6 +4,11 @@ import type {VaultClient} from './types';
 export class ObsidianVault implements VaultClient {
   private inventory=new Map<string,string>();
   constructor(private app:App) {}
+  private allowed(path:string):boolean {
+    const config=(this.app.vault.configDir??'.obsidian').normalize('NFC').toLowerCase().replace(/\/$/,'');
+    const target=path.normalize('NFC').toLowerCase().replace(/\/$/,'');
+    return syncPath(path) && target!==config && !target.startsWith(config+'/');
+  }
   async scanChanges():Promise<string[]> {
     const next=new Map<string,string>();const changed:string[]=[];
     for(const path of await this.listFiles()) {
@@ -27,13 +32,13 @@ export class ObsidianVault implements VaultClient {
     const result:string[]=[];
     const walk=async(path:string):Promise<void>=>{
       const listing=await this.app.vault.adapter.list(path);
-      for(const file of listing.files) if(syncPath(file)) result.push(file);
-      for(const folder of listing.folders) if(syncPath(folder)) {result.push(folder+'/');await walk(folder);}
+      for(const file of listing.files) if(this.allowed(file)) result.push(file);
+      for(const folder of listing.folders) if(this.allowed(folder)) {result.push(folder+'/');await walk(folder);}
     };
     await walk('');return result;
   }
   async read(path:string):Promise<string|null> {
-    if(!syncPath(path)) throw new Error('Unsupported path.');
+    if(!this.allowed(path)) throw new Error('Unsupported path.');
     const diskPath=path.endsWith('/')?path.slice(0,-1):path;
     const stat=await this.app.vault.adapter.stat(diskPath);
     if(!stat)return null;
@@ -75,6 +80,7 @@ export class ObsidianVault implements VaultClient {
     } finally {if(await adapter.exists(staging))await adapter.remove(staging);}
   }
   async recoverIncoming(path:string,expected:string|null,preserve:(content:string)=>Promise<void>):Promise<void> {
+    if(!this.allowed(path)) throw new Error('Unsupported path.');
     if(path.endsWith('/') || markdown(path))return;
     const adapter=this.app.vault.adapter,backup=this.recoveryPath(path);
     if(!await adapter.exists(backup))return;
@@ -89,7 +95,7 @@ export class ObsidianVault implements VaultClient {
     await adapter.remove(backup);
   }
   async create(path:string,content:string):Promise<void> {
-    if(!syncPath(path)) throw new Error('Unsupported path.');
+    if(!this.allowed(path)) throw new Error('Unsupported path.');
     validateContent(path,content);
     const target=path.endsWith('/')?path.slice(0,-1):path;
     if(await this.app.vault.adapter.exists(target))throw new Error('Path exists.');
@@ -99,7 +105,7 @@ export class ObsidianVault implements VaultClient {
     else await this.createUnindexed(path,content);
   }
   async compareAndSet(path:string,expected:string|null,content:string|null):Promise<boolean> {
-    if(!syncPath(path)) throw new Error('Unsupported path.');
+    if(!this.allowed(path)) throw new Error('Unsupported path.');
     if(content!==null)validateContent(path,content);
     if(path.endsWith('/') || !markdown(path) || !this.app.vault.getAbstractFileByPath(path)) {
       if(hash(await this.read(path))!==expected)return false;

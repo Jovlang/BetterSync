@@ -94,3 +94,29 @@ for(const deletion of [false,true])for(const pendingFirst of [false,true])test(
     assert.equal(disk,desired);assert.equal(trashCalls,deletion?1:0);
   }
 );
+
+ test('custom configuration paths reject reads, writes, deletes and recovery before filesystem access',async()=>{
+  let calls=0;
+  const adapter=new Proxy({}, {get(){return async()=>{calls++;throw new Error('Unexpected filesystem access');};}});
+  const vault=new host.ObsidianVault({vault:{configDir:'.private',adapter}} as unknown as App);
+  for(const path of ['.private/','.private/data.json','.PRIVATE/plugins/bettersync/data.json']) {
+    await assert.rejects(()=>vault.read(path),/Unsupported path/);
+    await assert.rejects(()=>vault.create(path,'e30='),/Unsupported path/);
+    await assert.rejects(()=>vault.compareAndSet(path,null,null),/Unsupported path/);
+    await assert.rejects(()=>vault.recoverIncoming(path,null,async()=>{}),/Unsupported path/);
+  }
+  assert.equal(calls,0);
+});
+
+test('inventory skips custom configuration subtrees but retains similarly named folders',async()=>{
+  const visited:string[]=[];
+  const adapter={list:async(path:string)=>{
+    visited.push(path);
+    if(path==='')return {files:['note.md'],folders:['.private','.private-notes']};
+    if(path==='.private-notes')return {files:['.private-notes/note.md'],folders:[]};
+    throw new Error('Configuration folder traversed');
+  }};
+  const vault=new host.ObsidianVault({vault:{configDir:'.private',adapter}} as unknown as App);
+  assert.deepEqual(await vault.listFiles(),['note.md','.private-notes/','.private-notes/note.md']);
+  assert.deepEqual(visited,['','.private-notes']);
+});
