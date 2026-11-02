@@ -10,7 +10,7 @@ export function confirmSetup(app:App,direction:'upload'|'download'):Promise<Setu
       private choice:SetupChoice='cancel';
       onOpen():void {
         this.contentEl.createEl('h2',{text:direction==='upload'?'Upload this vault?':'Download this vault?'});
-        this.contentEl.createEl('p',{text:direction==='upload'?'This sync database is empty. Upload this vault?':'Download the Markdown notes from this sync database?'});
+        this.contentEl.createEl('p',{text:direction==='upload'?'This sync database is empty. Upload this vault?':'Download the files and directories from this sync database?'});
         new Setting(this.contentEl)
           .addButton(b=>b.setButtonText('Cancel').onClick(()=>this.close()))
           .addButton(b=>b.setButtonText(direction==='upload'?'Upload':'Download').setCta().onClick(()=>{this.choice=direction;this.close();}));

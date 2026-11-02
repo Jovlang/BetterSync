@@ -4,8 +4,30 @@ export function hash(content: string | null): string | null {
   return content === null ? null : bytesToHex(sha256(new TextEncoder().encode(content)));
 }
 export function markdown(path: string): boolean {
-  return path.endsWith('.md') && !path.includes('\\') && !path.includes('\0') && !/[\u0000-\u001f]/.test(path)
-    && path.split('/').every(p => !!p && p !== '.' && p !== '..' && !p.startsWith('.'));
+  return syncPath(path) && path.endsWith('.md');
+}
+export const MAX_FILE_BYTES = 200 * 1024 * 1024;
+export function syncPath(path:string):boolean {
+  if(path.endsWith('/')) path=path.slice(0,-1);
+  return !!path && !/[\\\u0000-\u001f:]/.test(path)
+    && path.split('/').every(p=>!!p && p!=='.' && p!=='..' && p.toLowerCase()!=='.obsidian' && p.toLowerCase()!=='.trash');
+}
+export function encodeBinary(buffer:ArrayBuffer):string {
+  const bytes=new Uint8Array(buffer);let result='';
+  for(let i=0;i<bytes.length;i+=32766) result+=btoa(String.fromCharCode(...bytes.subarray(i,i+32766)));
+  return result;
+}
+export function decodeBinary(content:string):ArrayBuffer {
+  const bytes=new Uint8Array(content.length/4*3-(content.endsWith('==')?2:content.endsWith('=')?1:0));let offset=0;
+  for(let i=0;i<content.length;i+=32768) {const part=atob(content.slice(i,i+32768));for(let j=0;j<part.length;j++)bytes[offset++]=part.charCodeAt(j);}
+  return bytes.buffer;
+}
+export function validateContent(path:string,content:string):void {
+  if(path.endsWith('/')) {if(content!=='directory')throw new Error('Invalid directory record.');return;}
+  if(markdown(path)) {if(new TextEncoder().encode(content).length>MAX_FILE_BYTES)throw new Error('File exceeds 200 MiB.');return;}
+  if(content.length>Math.ceil(MAX_FILE_BYTES/3)*4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(content) || content.length%4!==0)throw new Error('Invalid or oversized binary file.');
+  const size=content.length/4*3-(content.endsWith('==')?2:content.endsWith('=')?1:0);
+  if(size>MAX_FILE_BYTES)throw new Error('File exceeds 200 MiB.');
 }
 export function documentId(path: string): string {
   const bytes = new TextEncoder().encode(path);

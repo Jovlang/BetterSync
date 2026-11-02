@@ -24,3 +24,9 @@ Known API limit: guarded deletion is a read followed by Obsidian's asynchronous 
 ## Repository
 
 The user created the private `Jovlang/BetterSync` GitHub repository during implementation. The source, tests and build workflow are committed on its `main` branch. The successful run and installable artifact are linked above.
+
+## Expanded file scope — 2 November 2026
+
+`npm run verify` passes: strict TypeScript, 49 automated tests, and browser-targeted build. Added coverage includes binary byte preservation and chunk boundaries, non-Markdown and hidden files, explicit empty directories, three-client offline binary conflicts and restart recovery, binary incoming crash replay, portable adapter directory deletion guards, hidden-path discovery, and rejecting oversized files before reading contents. The CouchDB integration test now includes binary and empty-directory records, but was not run for this change: no isolated server or Docker is available in this session. The earlier CI pass applies to the earlier Markdown-only implementation.
+
+All ten real desktop/MacBook/iPhone acceptance tests remain outstanding. Expanded-scope acceptance must additionally exercise near-limit file transfers, hidden paths, empty-directory rename/delete, type collisions, and binary edits during incoming writes. Binary adapter writes are guarded by a preceding digest check, but are not atomic; peak-memory behavior near 200 MiB remains unvalidated on iPhone. Upgrade all clients together before using the expanded protocol.

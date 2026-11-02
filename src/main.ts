@@ -1,4 +1,4 @@
-import {Notice, Plugin, requestUrl} from 'obsidian';
+import {Notice, Plugin, requestUrl, TFolder} from 'obsidian';
 import {CouchClient} from './couch-client';
 import {withTimeout} from './http';
 import {freshState, StateStore} from './local-state';
@@ -25,18 +25,19 @@ export default class BetterSync extends Plugin {
     this.statusEl=this.addStatusBarItem();this.settingsTab=new BetterSyncSettings(this.app,this);this.addSettingTab(this.settingsTab);
     this.addCommand({id:'retry-sync',name:'Retry sync',callback:()=>void this.retry()});
     const change=(path:string)=>{void this.engine?.changed(path).catch(()=>this.setStatus('Sync error'));};
-    this.registerEvent(this.app.vault.on('create',file=>change(file.path)));
+    const entry=(file:{path:string})=>file.path+(file instanceof TFolder?'/':'');
+    this.registerEvent(this.app.vault.on('create',file=>change(entry(file))));
     this.registerEvent(this.app.vault.on('modify',file=>change(file.path)));
     this.registerEvent(this.app.vault.on('delete',file=>{
-      change(file.path);
+      change(entry(file));
       for(const path of Object.keys(this.state?.files??{})) if(path.startsWith(file.path+'/')) change(path);
     }));
     this.registerEvent(this.app.vault.on('rename',(file,oldPath)=>{
-      change(oldPath);change(file.path);
+      change(oldPath+(file instanceof TFolder?'/':''));change(entry(file));
       // A folder rename changes the paths of its descendant notes without
       // necessarily emitting one event for each child on every platform.
       for(const path of Object.keys(this.state?.files??{})) if(path.startsWith(oldPath+'/')) change(path);
-      for(const note of this.app.vault.getMarkdownFiles()) if(note.path.startsWith(file.path+'/')) change(note.path);
+      for(const note of this.app.vault.getAllLoadedFiles()) if(note.path.startsWith(file.path+'/')) change(entry(note));
     }));
     this.registerDomEvent(document,'visibilitychange',()=>{if(!document.hidden) void this.retry();});
     this.registerDomEvent(window,'online',()=>void this.retry());

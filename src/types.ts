@@ -1,5 +1,5 @@
 export type Sequence = string | number;
-export interface FileDocument { _id: string; _rev?: string; schema: 1; path: string; content: string; mtime: number; deleted: boolean }
+export interface FileDocument { _id: string; _rev?: string; schema: 1 | 2; path: string; content: string; mtime: number; deleted: boolean }
 export interface Baseline { rev: string; hash: string | null }
 export interface Incoming { doc: FileDocument; expected: string | null }
 export interface LocalSyncState {
@@ -17,7 +17,8 @@ export interface Remote {
   getChanges(since: Sequence): Promise<RemoteChanges>;
 }
 export interface VaultClient {
-  listMarkdownFiles(): string[];
+  listFiles(): string[] | Promise<string[]>;
+  scanChanges?(): Promise<string[]>;
   read(path: string): Promise<string | null>;
   /** Must leave a changed file untouched, returning false. */
   compareAndSet(path: string, expectedHash: string | null, content: string | null): Promise<boolean>;

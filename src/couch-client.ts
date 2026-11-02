@@ -1,14 +1,16 @@
-import {documentId, markdown} from './paths';
+import {documentId, syncPath, validateContent} from './paths';
 import {SyncFailure, type FileDocument, type Remote, type RemoteChanges, type Sequence} from './types';
 export interface Connection {url:string; database:string; username:string; password:string}
 export interface HttpResponse {status:number; json:unknown}
 export type Http = (url:string, method:string, headers:Record<string,string>, body?:string) => Promise<HttpResponse>;
 export function validateDocument(value: unknown): FileDocument {
   const d = value as Partial<FileDocument> | null;
-  if (!d || d.schema !== 1 || typeof d.path !== 'string' || !markdown(d.path)
+  if (!d || (d.schema !== 1 && d.schema !== 2) || typeof d.path !== 'string' || !syncPath(d.path)
     || d._id !== documentId(d.path) || typeof d._rev !== 'string'
     || typeof d.content !== 'string' || typeof d.deleted !== 'boolean' || !Number.isFinite(d.mtime))
     throw new SyncFailure('data', 'The server contains an unreadable note.');
+  if(d.schema===1 && !d.path!.endsWith('.md')) throw new SyncFailure('data','Unsupported legacy record.');
+  if(!d.deleted) validateContent(d.path!,d.content!);
   return d as FileDocument;
 }
 export class CouchClient implements Remote {

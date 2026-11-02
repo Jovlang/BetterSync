@@ -8,7 +8,11 @@ One document per path:
 {"_id":"file:<base64url UTF-8 path>","_rev":"<server revision>","schema":1,"path":"Notes/Test.md","content":"text","mtime":0,"deleted":false}
 ```
 
-Path identity is deterministic and case-preserving. Paths are never normalized from server input: traversal, backslashes, absolute paths, hidden components and non-Markdown paths are rejected. Invalid records are retained in local diagnostics while unrelated valid records continue.
+Path identity is deterministic and case-preserving. Paths are never normalized from server input: traversal, backslashes, absolute paths, `.obsidian` and `.trash` components are rejected. Invalid records are retained in local diagnostics while unrelated valid records continue.
+
+Markdown retains schema 1 and UTF-8 text. Other regular files use schema 2 with base64 content. Directories use schema 2, a trailing slash in their record path, and content `directory`. The trailing slash is removed for filesystem access. File and directory type collisions stay queued rather than overwriting another object. The decoded file limit is 200 MiB. Empty directories are explicit records; deleting a directory waits for its children to reconcile and never recursively deletes local data.
+
+All clients should be upgraded together: old clients cannot read the expanded protocol.
 
 A deletion writes `deleted: true, content: ""` using a normal revision-checked PUT. It does **not** set CouchDB `_deleted` and is never purged by BetterSync. A newly connected client can therefore learn a deletion even after compaction. A client that has already learned a deletion may intentionally create a new note at that path using the marker's revision.
 
@@ -18,7 +22,7 @@ The database must be exclusive to BetterSync's protocol. Direct administrative p
 
 Each installation stores a random identity, database binding, opaque changes checkpoint, a per-path last-accepted revision and SHA-256 digest (or null for deletion), and any pending incoming operations. The vault remains the source of local file contents; there is no embedded sync database. Pending incoming operations contain the remote note until the local operation is completed. Metadata is stored in Obsidian's local plugin data, which is never synchronized by BetterSync.
 
-The baseline detects modifications or deletes made while the plugin was disabled or the app was closed. Startup inventories paths once; normal file events queue only the affected paths. Folder renames/deletions queue their tracked descendants.
+The baseline detects modifications or deletes made while the plugin was disabled or the app was closed. Startup inventories paths once; normal file events queue only the affected paths. A portable stat inventory additionally discovers hidden entries and missed events. Folder renames/deletions queue their tracked descendants.
 
 ## Serial cycle
 
@@ -51,6 +55,8 @@ Only after the filesystem operation is successful does the engine save the accep
 Obsidian exposes no atomic compare-and-trash operation. Remote deletes recheck disk and open editing buffers immediately before `Vault.trash(file, false)`, which retains the deleted file in vault trash. A user edit in the final asynchronous deletion window is an outstanding real-device verification concern; trash is the recovery layer. This is a reason the implementation is not certified against the real-device no-data-loss acceptance gate yet.
 
 Filesystem name equivalence differs between Linux, macOS and iOS. Case-only collisions and Unicode normalization collisions need testing on the target vaults. Invalid or unwriteable notes stay queued rather than authorizing an overwrite.
+
+Binary and unindexed-file replacements use a digest check followed by the portable adapter write; Obsidian provides no atomic binary compare-and-set. Concurrent edits during that asynchronous write window require real-device validation, as does peak memory use near 200 MiB. Hidden-file and binary deletes retain contents in local trash. Directory deletes only remove empty directories.
 
 ## Failure scope
 

@@ -4,11 +4,13 @@ This is the working implementation contract distilled from the user's **Minimal 
 
 ## Product promise
 
-Three or more independent Obsidian installations synchronize the same Markdown vault through one self-hosted CouchDB database. No master, device approval, remote lock or recovery ceremony. Temporary disconnection does not affect local editing. Reconnection and restarts resume automatically. Concurrent edits must preserve both contents without automatic text merging.
+Three or more independent Obsidian installations synchronize the same vault through one self-hosted CouchDB database. No master, device approval, remote lock or recovery ceremony. Temporary disconnection does not affect local editing. Reconnection and restarts resume automatically. Concurrent edits must preserve both contents without automatic text merging.
 
 ## Included
 
-- Markdown contents and vault-relative paths: create, modify, delete and rename.
+- Regular files, binary attachments, hidden files and explicit directories, including empty ones: create, modify, delete and rename.
+- Fixed 200 MiB per-file limit; oversized files remain local and report an error.
+- Scope expanded at user request on 2 November 2026.
 - Unicode, Norwegian characters, spaces and nested directories.
 - Three active clients; additional clients require no new architecture.
 - Persistent identity, baseline, checkpoint and interrupted-operation recovery.
@@ -20,7 +22,7 @@ Three or more independent Obsidian installations synchronize the same Markdown v
 
 ## Excluded
 
-Attachments, images, PDFs, audio/video, Canvas, `.obsidian`, settings, plugins, themes, workspace state, encryption, P2P, WebRTC, S3, alternate backends, device registries, revision-selection UI, automatic text merging, version-history UI, chunks, compression, selective sync, profiles, compatibility modes and LiveSync migration.
+`.obsidian`, local recovery trash (`.trash`), settings, plugins, themes, workspace state, encryption, P2P, WebRTC, S3, alternate backends, device registries, revision-selection UI, automatic text merging, version-history UI, chunks, compression, selective sync, profiles, compatibility modes and LiveSync migration.
 
 ## Safety rules
 
@@ -46,7 +48,7 @@ All ten scenarios in `ACCEPTANCE.md` must pass on three **real** Obsidian client
 
 ## Small implementation decisions
 
-- Hidden paths are conservatively excluded because Obsidian does not normally index hidden files.
+- Hidden paths synchronize through the portable adapter. `.obsidian` and local recovery `.trash` remain excluded. Filesystem inventory polls detect changes not indexed by Obsidian.
 - Renames are a new-path creation and old-path deletion; there is no identity-independent rename model.
 - Conflict names use a short installation ID plus content digest instead of a device name and clock timestamp. This avoids same-minute collisions and duplicate copies after crashes.
 - A local deletion against a newer remote edit preserves the remote contents and reports a conflict; no artificial empty conflict note is created.

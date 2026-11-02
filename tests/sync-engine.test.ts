@@ -105,8 +105,8 @@ test('paged bootstrap handles more than a thousand Markdown files',async()=>{
   const {a,b,c}=await three();for(let i=0;i<1050;i++)await a.vault.edit(`folder/${i}.md`,`note ${i}`);
   await settle(a,b,c);assert.equal(b.vault.files.size,1050);assert.equal(c.vault.files.size,1050);
 });
-test('non-Markdown and internal or traversal paths are excluded',async()=>{
-  const {a,remote}=await three();for(const p of ['image.png','.obsidian/secret.md','../outside.md','a//b.md','/absolute.md','x.canvas','a/./b.md']){assert.equal(markdown(p),false);await a.vault.edit(p,'excluded');}
+test('internal and traversal paths are excluded',async()=>{
+  const {a,remote}=await three();for(const p of ['.obsidian/secret.md','../outside.md','a//b.md','/absolute.md','a/./b.md']){assert.equal(markdown(p),false);await a.vault.edit(p,'excluded');}
   await a.tick();assert.equal(remote.seq,0);assert.equal(markdown('Norsk/Æ ø å.md'),true);
   assert.equal(documentId('Norsk/Æ ø å.md'),'file:'+Buffer.from('Norsk/Æ ø å.md').toString('base64url'));
   assert.notEqual(hash(''),hash(null));

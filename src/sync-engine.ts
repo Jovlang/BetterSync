@@ -1,4 +1,4 @@
-import {documentId, hash, markdown} from './paths';
+import {documentId, hash, syncPath, validateContent} from './paths';
 import {preserveConflict} from './conflict-handler';
 import {validateDocument} from './couch-client';
 import {StateStore, PersistenceFailure} from './local-state';
@@ -15,12 +15,12 @@ export class SyncEngine {
   /** A one-time inventory also recovers edits/deletions whose events were missed while closed. */
   async start():Promise<void> {
     this.stopped = false;
-    for (const p of [...this.vault.listMarkdownFiles(),...Object.keys(this.store.state.files)]) if(markdown(p)) this.dirty.add(p);
+    for (const p of [...(await this.vault.listFiles()),...Object.keys(this.store.state.files)]) if(syncPath(p)) this.dirty.add(p);
     await this.tick();
   }
   async stop():Promise<void> { this.stopped=true; await this.running; }
   async changed(path:string):Promise<void> {
-    if (!markdown(path) || this.stopped) return;
+    if (!syncPath(path) || this.stopped) return;
     const actual = hash(await this.vault.read(path));
     if (this.expectedRemoteWrites.has(path) && this.expectedRemoteWrites.get(path) === actual) {
       this.expectedRemoteWrites.delete(path); this.ui.log('remote write ignored as expected local event',path); return;
@@ -38,6 +38,7 @@ export class SyncEngine {
   private async cycle():Promise<void> {
     this.ui.status('Syncing…');
     try {
+      for(const path of await this.vault.scanChanges?.()??[])this.dirty.add(path);
       if(!this.store.state.initialized) {
         if(!await this.initialize()) return;
       }
@@ -82,7 +83,8 @@ export class SyncEngine {
         catch(error) {
           this.dirty.add(path);
           if(error instanceof PersistenceFailure || (error instanceof SyncFailure && ['temporary','configuration'].includes(error.kind))) throw error;
-          failed=true; this.ui.log('could not upload local note',path);
+          failed=true; if(error instanceof Error && error.message.includes('200 MiB'))this.ui.notice('File exceeds the 200 MiB sync limit: '+path);
+          this.ui.log('could not upload local note',path);
         }
       }
       this.ui.status(failed || Object.keys(this.store.state.rejected??{}).length ? 'Sync error' : this.hadConflict ? 'Conflict' : this.dirty.size ? 'Syncing…' : 'Synced');
@@ -107,7 +109,7 @@ export class SyncEngine {
         probe=page.last_seq;
         if(this.stopped) return false;
       }
-      const local=this.vault.listMarkdownFiles().filter(markdown);
+      const local=(await this.vault.listFiles()).filter(syncPath);
       if(local.length && hasRemote) {
         this.blocked=true;this.ui.status('Sync error');
         this.ui.notice('This device and the server both already contain files. Automatic first-time merging is not supported yet.');return false;
@@ -168,10 +170,11 @@ export class SyncEngine {
     const base=this.store.state.files[path];
     const content=await this.vault.read(path), digest=hash(content);
     if(digest===(base?.hash ?? null)) return;
+    if(content!==null) validateContent(path,content);
     const remote=await this.remote.getDocument(path);
     if(remote && remote._rev!==base?.rev) {await this.receive(remote);return;}
     if(!remote && base) throw new SyncFailure('data','A synced note is missing from the server.');
-    const doc:FileDocument={_id:documentId(path),schema:1,path,content:content??'',deleted:content===null,mtime:Date.now()};
+    const doc:FileDocument={_id:documentId(path),schema:path.endsWith('.md')?1:2,path,content:content??'',deleted:content===null,mtime:Date.now()};
     if(base) doc._rev=base.rev;
     try {
       const saved=content===null?await this.remote.deleteDocument(doc):await this.remote.putDocument(doc);

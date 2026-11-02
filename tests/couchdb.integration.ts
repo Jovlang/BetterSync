@@ -24,6 +24,8 @@ test('real CouchDB: three clients, conflicts, restart, deletes, Unicode and stal
   try {
     const a=new Device(client()),b=new Device(client()),c=new Device(client());
     await a.start();await b.start();await c.start();
+    await a.vault.edit('attachment.bin','AP+A');await a.vault.edit('empty/','directory');await settle(a,b,c);
+    for(const d of [a,b,c]) {assert.equal(await d.vault.read('attachment.bin'),'AP+A');assert.equal(await d.vault.read('empty/'),'directory');}
     const path='Norsk/Handleliste æøå 🥰.md';
     await a.vault.edit(path,'base');await settle(a,b,c);
     assert.equal(await b.vault.read(path),'base');assert.equal(await c.vault.read(path),'base');

@@ -27,7 +27,7 @@ export class MemoryRemote implements Remote {
 export class MemoryVault implements VaultClient {
   files=new Map<string,string>();onChange?:(path:string)=>Promise<void>;
   beforeCAS?:()=>Promise<void>; failPath?:string;
-  listMarkdownFiles(){return [...this.files.keys()].filter(p=>p.endsWith('.md'));}
+  listFiles(){return [...this.files.keys()];}
   async read(path:string){return this.files.get(path)??null;}
   async create(path:string,content:string){if(this.files.has(path)) throw new Error('Exists');this.files.set(path,content);await this.onChange?.(path);}
   async edit(path:string,content:string|null){if(content===null)this.files.delete(path);else this.files.set(path,content);await this.onChange?.(path);}

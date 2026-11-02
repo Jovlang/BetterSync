@@ -42,3 +42,7 @@ Repeat the conflict scenario with A, B and C each taking the offline role. Confi
 - [ ] Attachments, Canvas and plugin settings are untouched.
 - [ ] Thousands of notes remain usable and startup/polling have acceptable cost on iPhone.
 - [ ] Do not ship as a completed MVP until the ten numbered rows and data-preservation checks pass.
+
+## Expanded file scope checks
+
+In addition to all ten original acceptance scenarios, test attachments, Canvas, extensionless and hidden files on all three real clients. Confirm `.obsidian` and recovery `.trash` stay local. Create, rename and remove empty and populated directories; ensure a remote directory deletion cannot remove unsynced children. Exercise binary conflicts, offline deletes, crash replay and file/directory collisions. Test files just below, exactly at and above 209,715,200 bytes with appropriately configured server/proxy limits. Verify concurrent binary edits during incoming writes and measure iPhone memory behavior near the limit. These checks are not yet device-validated.
