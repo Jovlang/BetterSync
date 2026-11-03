@@ -90,3 +90,7 @@ The separate real CouchDB suite now also constructs three encrypted engine insta
 ## Setup persistence adapter — 3 November 2026
 
 Added PersistentSetupStorage with serialized saves, isolated snapshots and publication only after persistence succeeds. npm run verify passes 129 tests and the browser build. Tests cover failed saves, subsequent retry, concurrent saves and caller/adapter mutation. The adapter still requires wiring to the plugin's shared persistence owner; production encrypted setup and device acceptance remain pending. No HTTP changes were made in this increment.
+
+## Plugin setup persistence wiring — 3 November 2026
+
+The plugin now loads encryption setup intent and preserves it through its existing serialized saveData queue. Setup publication follows successful persistence, and queued ordinary saves retain the latest committed intent. Existing encrypted intent blocks database rebinding and plaintext startup until encrypted startup/UI integration is completed. npm run verify passes 129 tests and the browser build; these results do not establish real Obsidian lifecycle acceptance. Recovery-code UI and encrypted startup remain unfinished.

@@ -7,11 +7,15 @@ import {defaults, BetterSyncSettings, confirmSetup, type Settings} from './setti
 import {SyncEngine} from './sync-engine';
 import {ObsidianVault} from './vault-client';
 import type {LocalSyncState, SyncStatus} from './types';
-interface Saved {settings:Settings; state?:LocalSyncState}
+import {PersistentSetupStorage} from './setup-storage';
+import type {SetupIntent} from './encryption-setup';
+interface Saved {settings:Settings; state?:LocalSyncState; encryptionSetup?:SetupIntent}
 export default class BetterSync extends Plugin {
   settings:Settings={...defaults};
   status:SyncStatus='Synced';
   private state?:LocalSyncState;
+  private encryptionSetup?:SetupIntent;
+  private setupStorage!:PersistentSetupStorage;
   private engine?:SyncEngine;
   private settingsTab!:BetterSyncSettings;
   private statusEl!:HTMLElement;
@@ -22,6 +26,8 @@ export default class BetterSync extends Plugin {
   async onload():Promise<void> {
     const saved=await this.loadData() as Saved|null;
     this.settings={...defaults,...saved?.settings};this.state=saved?.state;
+    this.encryptionSetup=saved?.encryptionSetup;
+    this.setupStorage=new PersistentSetupStorage(this.encryptionSetup??null,intent=>this.persist(intent));
     this.statusEl=this.addStatusBarItem();this.settingsTab=new BetterSyncSettings(this.app,this);this.addSettingTab(this.settingsTab);
     this.addCommand({id:'retry-sync',name:'Retry sync',callback:()=>void this.retry()});
     const change=(path:string)=>{void this.engine?.changed(path).catch(()=>this.setStatus('Sync error'));};
@@ -46,9 +52,17 @@ export default class BetterSync extends Plugin {
   private setStatus(status:SyncStatus):void {
     this.status=status;this.statusEl.setText(this.settings.enabled?`BetterSync: ${status}`:'');this.settingsTab.showStatus(status);
   }
-  private persist():Promise<void> {
+  private persist(setup?:SetupIntent):Promise<void> {
     const snapshot=JSON.parse(JSON.stringify({settings:this.settings,state:this.state})) as Saved;
-    const next=this.writes.then(()=>this.saveData(snapshot));this.writes=next.catch(()=>{});return next;
+    const setupSnapshot=setup?structuredClone(setup):undefined;
+    const next=this.writes.then(async()=>{
+      // Resolve setup at execution time: a settings save queued before a setup
+      // commit must not subsequently erase the newly committed intent.
+      const intent=setupSnapshot??this.encryptionSetup;
+      if(intent) snapshot.encryptionSetup=structuredClone(intent);
+      await this.saveData(snapshot);
+      if(setupSnapshot) this.encryptionSetup=setupSnapshot;
+    });this.writes=next.catch(()=>{});return next;
   }
   private client():CouchClient {
     return new CouchClient(this.settings,withTimeout(async(url,method,headers,body,responseType)=>{
@@ -64,6 +78,9 @@ export default class BetterSync extends Plugin {
       const settings={...this.settings,...patch};
       // A client baseline must never be reused against a different database.
       const binding=hash(settings.url.replace(/\/$/,'')+'\n'+settings.database)!;
+      if(this.encryptionSetup && this.encryptionSetup.binding!==binding) {
+        new Notice('Encryption setup belongs to another database. Keep the same server and database for this vault.');return;
+      }
       if(this.state && this.state.binding!==binding && (this.state.initialized || this.state.setup)) {
         new Notice('This installation is already connected to another sync database. Keep the same server and database for this vault.');return;
       }
@@ -71,6 +88,11 @@ export default class BetterSync extends Plugin {
       await this.engine?.stop();this.engine=undefined;this.settings={...settings};
       await this.persist();
       if(!settings.enabled) {this.setStatus('Synced');return;}
+      // Until encrypted startup/UI wiring lands, never run plaintext sync with
+      // an existing encrypted setup intent, even when the sync state is empty.
+      if(this.encryptionSetup) {
+        this.setStatus('Sync error');new Notice('Encrypted setup is saved. This build cannot resume encrypted sync yet.');return;
+      }
       try {
         const remote=this.client();
         const state=this.state?.binding===binding?this.state:freshState(binding);this.state=state;
