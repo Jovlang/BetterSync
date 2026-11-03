@@ -64,6 +64,11 @@ export class VaultCrypto {
     return 'e4:' + base64url(new Uint8Array(await crypto.subtle.sign('HMAC', this.ids, frame(CRYPTO_DOMAIN, 'path', path))));
   }
 
+  async stateBinding(databaseIdentity: string): Promise<string> {
+    return 'e4:' + base64url(new Uint8Array(await crypto.subtle.sign('HMAC', this.ids,
+      frame(CRYPTO_DOMAIN, 'local-state-binding', this.vaultId, databaseIdentity))));
+  }
+
   private async parameters(id: string, salt: string, purpose: Purpose) {
     if (!/^e4:[A-Za-z0-9_-]{43}$/.test(id) && !(id === 'bettersync:configuration' && purpose === 'configuration'))
       throw new EncryptionError();

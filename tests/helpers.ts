@@ -46,7 +46,7 @@ export class Device {
   vault=new MemoryVault();engine!:SyncEngine;store!:StateStore;
   disk!:LocalSyncState;status:SyncStatus='Synced';notices:string[]=[];
   choice:'upload'|'download'|'cancel'|undefined; saveFailure=false;
-  constructor(public remote:Remote){this.disk=freshState('test');this.reboot();}
+  constructor(public remote:Remote){this.disk=freshState(remote.stateBinding??'test');this.reboot();}
   reboot(){
     this.store=new StateStore(structuredClone(this.disk),async s=>{if(this.saveFailure)throw new Error('Disk full');this.disk=structuredClone(s);});
     this.engine=new SyncEngine(this.vault,this.remote,this.store,{

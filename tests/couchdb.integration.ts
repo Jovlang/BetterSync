@@ -6,6 +6,9 @@ import {Device,settle} from './helpers';
 import {SyncFailure} from '../src/types';
 import {documentId,decodeBinary,encodeBinary,rawHash} from '../src/paths';
 import {CouchConfiguration} from '../src/couch-configuration';
+import {EncryptedCouch} from '../src/encrypted-couch';
+import {EncryptedRemote} from '../src/encrypted-remote';
+import {syncPath} from '../src/paths';
 import {EncryptionSetup, generateRecoveryCode, createConfiguration, importRecoveryCode, CONFIGURATION_ID, type SetupIntent} from '../src/encryption-setup';
 const address=process.env.BETTERSYNC_TEST_SERVER;
 if(!address)throw new Error('Set BETTERSYNC_TEST_SERVER to a disposable local CouchDB instance.');
@@ -57,6 +60,41 @@ test('real CouchDB: encrypted setup, lost response, three clients and native tom
     const other = await createConfiguration(await importRecoveryCode(generateRecoveryCode()));
     await assert.rejects(() => remote.createConfiguration(other), (e: unknown) => e instanceof SyncFailure && e.kind === 'conflict');
     assert.deepEqual(await remote.getConfiguration(), current);
+    const encryptedClients = await Promise.all([0, 1, 2].map(async () => EncryptedCouch.connect(connection, http,
+      await importRecoveryCode(code), syncPath)));
+    const first = encryptedClients[0]!, path = 'Private Æ/encrypted.md';
+    const bytes = new TextEncoder().encode('synthetic wire encryption canary').buffer;
+    const saved = await first.put({path, bytes, deleted: false, mtime: 0});
+    for (const encrypted of encryptedClients) {
+      const fetched = await encrypted.get(path); assert.ok(fetched);
+      assert.deepEqual((await encrypted.download(fetched)).bytes, bytes);
+    }
+    const page = await first.changes(0);
+    assert.ok(page.sourceRows >= 2); // Configuration counts toward pagination.
+    assert.ok(page.results.some(row => 'record' in row && row.id === saved._id));
+    assert.ok(!JSON.stringify(page).includes(path));
+    assert.ok(!JSON.stringify(page).includes('synthetic wire encryption canary'));
+    const updated = await first.put({path, bytes: new Uint8Array([0, 255, 128]).buffer, deleted: false, mtime: 1}, saved._rev);
+    assert.deepEqual((await first.download(saved)).bytes, bytes); // Old revision, not latest bytes.
+    await assert.rejects(() => first.put({path, bytes, deleted: false, mtime: 2}, saved._rev),
+      (e: unknown) => e instanceof SyncFailure && e.kind === 'conflict');
+    const empty = await first.put({path: 'empty.md', bytes: new ArrayBuffer(0), deleted: false, mtime: 0});
+    assert.equal((await first.download(empty)).bytes!.byteLength, 0);
+    const marker = await first.put({path, deleted: true, mtime: 3}, updated._rev);
+    assert.equal(marker._attachments, undefined); assert.equal((await first.download(marker)).metadata.deleted, true);
+    const restored = await EncryptedCouch.connect(connection, http, await importRecoveryCode(code), syncPath);
+    const restoredMarker = await restored.get(path); assert.ok(restoredMarker);
+    assert.equal((await restored.download(restoredMarker)).metadata.deleted, true);
+    const engineClients = await Promise.all([0,1,2].map(async()=>new Device(await EncryptedRemote.connect(connection,http,
+      await importRecoveryCode(code),syncPath))));
+    const [ea,eb,ec]=engineClients as [Device,Device,Device];
+    await ea.start();await eb.start();await ec.start();
+    await ea.vault.edit('engine.md','base');await settle(ea,eb,ec);
+    await ea.vault.edit('engine.md','remote edit');await settle(ea,ec);
+    await eb.vault.edit('engine.md','offline edit');await eb.restart();await settle(ea,eb,ec);
+    for(const d of engineClients) {assert.equal(await d.vault.read('engine.md'),'remote edit');assert.ok([...d.vault.files.values()].includes('offline edit'));}
+    await ec.vault.edit('engine.md',null);await settle(ea,eb,ec);await eb.restart();await settle(ea,eb,ec);
+    for(const d of engineClients)assert.equal(await d.vault.read('engine.md'),null);
     // Native deletion is deliberately unsupported: never silently recreate config.
     assert.equal((await fetch(`${url}/${encodeURIComponent(CONFIGURATION_ID)}?rev=${encodeURIComponent(current._rev)}`,
       {method: 'DELETE', headers: {Authorization: auth}})).status, 200);

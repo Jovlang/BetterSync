@@ -11,7 +11,11 @@ export class SyncEngine {
   private stopped = false;
   private blocked = false;
   private hadConflict = false;
-  constructor(private vault:VaultClient, private remote:Remote, private store:StateStore, private ui:EngineUI) {}
+  constructor(private vault:VaultClient, private remote:Remote, private store:StateStore, private ui:EngineUI) {
+    if(remote.stateBinding && store.state.binding!==remote.stateBinding)
+      throw new SyncFailure('configuration','Sync progress belongs to a different vault, key or database.');
+  }
+  private ownsRecord(id:string):boolean {return this.remote.ownsRecord?.(id)??id.startsWith('file:');}
   /** A one-time inventory also recovers edits/deletions whose events were missed while closed. */
   async start():Promise<void> {
     this.stopped = false;
@@ -23,7 +27,7 @@ export class SyncEngine {
     if (!syncPath(path) || this.stopped) return;
     const actual = hash(await this.vault.read(path));
     if (this.expectedRemoteWrites.has(path) && this.expectedRemoteWrites.get(path) === actual) {
-      this.expectedRemoteWrites.delete(path); this.ui.log('remote write ignored as expected local event',path); return;
+      this.expectedRemoteWrites.delete(path); this.ui.log('remote write ignored as expected local event'); return;
     }
     this.expectedRemoteWrites.delete(path);
     this.dirty.add(path);
@@ -44,50 +48,55 @@ export class SyncEngine {
       }
       // A failed journal save leaves the operation in memory. Re-establish
       // durability before replay so a later poll cannot bypass that failure.
-      if(Object.keys(this.store.state.incoming).length) await this.store.save();
+      if(Object.keys(this.store.state.incoming).length || Object.keys(this.store.state.rejected??{}).length) await this.store.save();
       // A persisted incoming operation is completed before advancing any checkpoint.
       let failed=false;
       for(const p of Object.keys(this.store.state.incoming)) {
         try {await this.finishIncoming(p);}
-        catch(error) {if(error instanceof PersistenceFailure) throw error;failed=true;this.ui.log('could not apply queued note',p);}
+        catch(error) {if(error instanceof PersistenceFailure || (error instanceof SyncFailure && error.kind==='configuration')) throw error;failed=true;this.ui.log('could not apply queued note');}
       }
       // Incoming operations are durably queued before application. A failed file
       // stays queued while the checkpoint and unrelated files continue forward.
+      let caughtUp=false;
       for(let page=0;page<20 && !this.stopped;page++) {
         const changes=await this.remote.getChanges(this.store.state.lastSequence);
         for(const change of changes.results) {
           if(this.stopped) return;
-          if(!change.id.startsWith('file:')) continue;
+          if(!this.ownsRecord(change.id)) continue;
           try {
             if(change.deleted) throw new SyncFailure('data','A note was removed outside BetterSync.');
-            const doc=validateDocument(change.doc);
+            const doc=this.remote.validateIncoming ? await this.remote.validateIncoming(change.doc) : validateDocument(change.doc);
             if(this.store.state.rejected) delete this.store.state.rejected[change.id];
             await this.receive(doc);
           } catch(error) {
             if(error instanceof PersistenceFailure || (error instanceof SyncFailure && ['temporary','configuration'].includes(error.kind))) throw error;
             // Invalid server records remain recorded for diagnostics; valid files
             // that could not be written already have a persistent incoming entry.
-            if(!Object.values(this.store.state.incoming).some(op=>op.doc._id===change.id)) {
-              (this.store.state.rejected??={})[change.id]=change;
+            if((this.remote.stateBinding && !change.doc) || !Object.values(this.store.state.incoming).some(op=>op.doc._id===change.id)) {
+              (this.store.state.rejected??=Object.create(null))[change.id]=this.remote.stateBinding ? {id:change.id,rejected:'invalid-record'} : change;
               await this.store.save();
             }
-            failed=true; this.ui.log('could not apply remote note',change.id);
+            failed=true; this.ui.log('could not apply remote note');
           }
         }
         this.store.state.lastSequence=changes.last_seq;
         await this.store.save();
-        if(changes.results.length<200) break;
+        if((changes.sourceRows??changes.results.length)<200) {caughtUp=true;break;}
       }
+      // Drain the remote backlog before authorizing writes, including foreign-protocol checks.
+      if(!caughtUp) {this.ui.status(failed?'Sync error':'Syncing…');return;}
       for(const path of [...this.dirty]) {
         if(this.stopped) return;
         if(this.store.state.incoming[path]) continue;
+        const id=this.remote.identity ? await this.remote.identity(path) : documentId(path);
+        if(Object.hasOwn(this.store.state.rejected??{},id)) {failed=true;continue;}
         this.dirty.delete(path);
         try {await this.push(path);}
         catch(error) {
           this.dirty.add(path);
           if(error instanceof PersistenceFailure || (error instanceof SyncFailure && ['temporary','configuration'].includes(error.kind))) throw error;
           failed=true; if(error instanceof Error && error.message.includes('200 MiB'))this.ui.notice('File exceeds the 200 MiB sync limit: '+path);
-          this.ui.log('could not upload local note',path);
+          this.ui.log('could not upload local note');
         }
       }
       this.ui.status(failed || Object.keys(this.store.state.rejected??{}).length ? 'Sync error' : this.hadConflict ? 'Conflict' : this.dirty.size ? 'Syncing…' : 'Synced');
@@ -106,8 +115,8 @@ export class SyncEngine {
       let hasRemote=false;
       for(;;) {
         const page=await this.remote.getChanges(probe);
-        hasRemote=page.results.some(c=>c.id.startsWith('file:'));
-        if(hasRemote || page.results.length<200) break;
+        hasRemote=page.results.some(c=>this.ownsRecord(c.id));
+        if(hasRemote || (page.sourceRows??page.results.length)<200) break;
         if(page.last_seq===probe) throw new SyncFailure('data','Could not read the sync database.');
         probe=page.last_seq;
         if(this.stopped) return false;
@@ -143,7 +152,9 @@ export class SyncEngine {
     const operation=state.incoming[path];
     if(!operation) return;
     const {doc,expected}=operation;
-    const desired:Content|null=doc.deleted ? null : doc.schema===3
+    if(doc.path!==path) throw new SyncFailure('data','The incoming path does not match its journal.');
+    if(Object.hasOwn(state.rejected??{},doc._id)) throw new SyncFailure('data','This record is quarantined.');
+    const desired:Content|null=this.remote.readContent ? await this.remote.readContent(doc) : doc.deleted ? null : doc.schema===3
       ? await this.remote.getAttachment(doc)
       : doc.schema===2 && !path.endsWith('/') && !path.endsWith('.md') ? decodeBinary(doc.content!) : doc.content!;
     const desiredHash=hash(desired);
@@ -162,11 +173,11 @@ export class SyncEngine {
         }
         this.hadConflict=true;
         this.ui.notice(`Sync conflict in ${path}. Both versions were kept.`);
-        this.ui.log('conflict detected',path);
+        this.ui.log('conflict detected');
       }
       this.expectedRemoteWrites.set(path,desiredHash);
       if(await this.vault.compareAndSet(path,current,desired)) {
-        await this.accept(doc,desiredHash);this.ui.log('remote write applied',path);return;
+        await this.accept(doc,desiredHash);this.ui.log('remote write applied');return;
       }
       this.expectedRemoteWrites.delete(path);
     }
@@ -185,18 +196,23 @@ export class SyncEngine {
     const remote=await this.remote.getDocument(path);
     if(remote && remote._rev!==base?.rev) {await this.receive(remote);return;}
     if(!remote && base) throw new SyncFailure('data','A synced note is missing from the server.');
-    const binary=content!==null && !path.endsWith('/') && !path.endsWith('.md');
-    const bytes=binary ? (typeof content==='string'?decodeBinary(content):content!) : undefined;
-    const doc:FileDocument=bytes ? {_id:documentId(path),schema:3,path,deleted:false,mtime:Date.now(),size:bytes.byteLength,hash:rawHash(bytes),_attachments:{content:{stub:true,content_type:'application/octet-stream',length:bytes.byteLength}}}
-      : {_id:documentId(path),schema:path.endsWith('.md')?1:2,path,content:(content??'') as string,deleted:content===null,mtime:Date.now()};
-    if(base) doc._rev=base.rev;
     try {
-      const saved=content===null?await this.remote.deleteDocument(doc):await this.remote.putDocument(doc,bytes);
+      let saved:FileDocument;
+      if(this.remote.writeContent) saved=await this.remote.writeContent(path,content,base?.rev);
+      else {
+        const binary=content!==null && !path.endsWith('/') && !path.endsWith('.md');
+        const bytes=binary ? (typeof content==='string'?decodeBinary(content):content!) : undefined;
+        const doc:FileDocument=bytes ? {_id:documentId(path),schema:3,path,deleted:false,mtime:Date.now(),size:bytes.byteLength,hash:rawHash(bytes),_attachments:{content:{stub:true,content_type:'application/octet-stream',length:bytes.byteLength}}}
+          : {_id:documentId(path),schema:path.endsWith('.md')?1:2,path,content:(content??'') as string,deleted:content===null,mtime:Date.now()};
+        if(base) doc._rev=base.rev;
+
+        saved=content===null?await this.remote.deleteDocument(doc):await this.remote.putDocument(doc,bytes);
+      }
       // Record exactly what was uploaded, never a newer local edit made during HTTP.
       this.store.state.files[path]={rev:saved._rev!,hash:digest};
       await this.store.save();
       if(hash(await this.vault.read(path))!==digest) this.dirty.add(path);
-      this.ui.log('remote document updated',path);
+      this.ui.log('remote document updated');
     } catch(error) {
       if(error instanceof SyncFailure && error.kind==='conflict') {
         const current=await this.remote.getDocument(path);

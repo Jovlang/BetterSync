@@ -34,7 +34,7 @@ This protocol is independent of LiveSync: **do not point it at a LiveSync databa
 
 There is no end-to-end encryption. The server can read note contents, and credentials are stored in the installation's local Obsidian plugin data. Use a database-scoped account, protect the server, and do not commit or copy `data.json`.
 
-E2EE implementation has started with experimental crypto, record codecs, recovery-code handling, resumable key setup, Obsidian secret-storage and CouchDB configuration adapters, and adversarial tests. They are **not connected to sync or the production setup UI** and do not protect this build's transfers. See [the implementation plan](docs/E2EE-PLAN.md) and [benchmark instructions](docs/E2EE-BENCHMARKS.md). The encrypted wire layout remains provisional pending small-file initial-sync and physical-iPhone memory measurements.
+E2EE implementation includes experimental crypto, recovery-code handling, resumable key setup, Obsidian secret-storage, encrypted CouchDB transport, and integration with the existing sync engine under automated tests. The encrypted path is **not connected to the production setup UI** and does not protect this build's normal transfers. See [the implementation plan](docs/E2EE-PLAN.md) and [benchmark instructions](docs/E2EE-BENCHMARKS.md). The encrypted wire layout remains provisional pending small-file initial-sync and physical-iPhone memory measurements.
 
 ## Development
 

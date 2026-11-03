@@ -1,7 +1,7 @@
 export type Sequence = string | number;
 export type Content = string | ArrayBuffer;
 export interface Attachment { stub: true; content_type: string; length: number }
-export interface FileDocument { _id: string; _rev?: string; schema: 1 | 2 | 3; path: string; content?: string; mtime: number; deleted: boolean; size?: number; hash?: string; _attachments?: {content: Attachment} }
+export interface FileDocument { _id: string; _rev?: string; schema: 1 | 2 | 3; path: string; content?: string; mtime: number; deleted: boolean; size?: number; hash?: string; _attachments?: {content: Attachment}; encrypted?: import('./encrypted-protocol').EncryptedRecord }
 export interface Baseline { rev: string; hash: string | null }
 export interface Incoming { doc: FileDocument; expected: string | null }
 export interface LocalSyncState {
@@ -10,8 +10,15 @@ export interface LocalSyncState {
   files: Record<string, Baseline>; incoming: Record<string, Incoming>;
   rejected?: Record<string, unknown>;
 }
-export interface RemoteChanges { results: {seq: Sequence; id: string; doc?: unknown; deleted?: boolean}[]; last_seq: Sequence; pending?: number }
+export interface RemoteChanges { results: {seq: Sequence; id: string; doc?: unknown; deleted?: boolean}[]; last_seq: Sequence; pending?: number; sourceRows?: number }
 export interface Remote {
+  /** Internal protocol boundary, not user-selectable sync modes. */
+  stateBinding?: string;
+  ownsRecord?(id: string): boolean;
+  identity?(path: string): Promise<string>;
+  validateIncoming?(value: unknown): Promise<FileDocument>;
+  readContent?(doc: FileDocument): Promise<Content | null>;
+  writeContent?(path: string, content: Content | null, rev?: string): Promise<FileDocument>;
   getAttachment(doc: FileDocument): Promise<ArrayBuffer>;
   testConnection(): Promise<void>;
   getDocument(path: string): Promise<FileDocument | null>;

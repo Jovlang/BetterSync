@@ -12,6 +12,7 @@ export class StateStore {
     // loaded state, retaining own entries such as a file named __proto__.
     Object.setPrototypeOf(state.files,null);
     Object.setPrototypeOf(state.incoming,null);
+    if(state.rejected) Object.setPrototypeOf(state.rejected,null);
   }
   save(): Promise<void> {
     const snapshot = structuredClone(this.state);
