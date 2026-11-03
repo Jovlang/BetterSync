@@ -56,3 +56,7 @@ All ten scenarios in `ACCEPTANCE.md` must pass on three **real** Obsidian client
 - The installation is bound to its first database. An initialized vault cannot silently switch database in settings.
 
 Apply the anti-cruft rule to future changes: if the software can make a safe decision itself, do not add another setting or mode.
+
+## E2EE work in progress — 3 November 2026
+
+The user authorized E2EE implementation after reviewing `E2EE-PLAN.md`. Encryption remains unavailable in the current sync runtime; its exclusion above describes that runtime, not the newly authorized work. The first increment adds experimental cryptographic primitives, a strict encrypted record codec and benchmark fixtures without changing active database formats or setup behavior. Schema 4 must not be frozen before comparative small-file initial-sync benchmarks and physical-iPhone peak-memory measurements. Preserve one sync model and the existing real-device acceptance gate.

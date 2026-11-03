@@ -1,8 +1,12 @@
 # E2EE implementation plan
 
-Date: 3 November 2026. Status: proposed design, not implemented or security-reviewed.
+Date: 3 November 2026. Status: implementation started; experimental crypto/codec foundation only, not connected to sync or security-reviewed. Schema 4 is not frozen.
 
-The user's E2EE request authorizes planning a change to the encryption exclusion in SPEC.md. Keep the current product contract accurate until implementation lands. This plan adds one encrypted protocol, not an encryption toggle, a second sync model, device registration, or algorithm settings.
+The user authorized implementation after reviewing this plan. Keep the current product contract accurate until E2EE is connected to sync and verified. This plan adds one encrypted protocol, not an encryption toggle, a second sync model, device registration, or algorithm settings.
+
+First increment: `src/crypto.ts` and `src/encrypted-protocol.ts` implement the experimental attachment candidate; `tests/encryption.test.ts` covers independent Node-crypto interoperability and adversarial cases. `tests/benchmark-fixtures.ts` and `npm run benchmark:e2ee:codec` provide synthetic fixtures and a codec microbenchmark, not the required initial-sync/device measurements. See `E2EE-BENCHMARKS.md`. Recovery codes, SecretStorage, vault configuration, encrypted HTTP transport, engine/journal integration and the full benchmark prototype remain to implement. Existing three-client engine tests still exercise the plaintext protocol.
+
+The draft implementation uses a separate protocol domain (`bettersync-e2ee-draft-1`), 16-byte random vault identity, a provisional 4 KiB UTF-8 path bound and 16 KiB metadata bound. It derives operation keys directly from the imported HKDF root with vault/record/purpose separation rather than introducing an intermediate record-root key. This is a provisional construction to review, not a compatibility promise. Neither draft records nor their keys should be used for real vaults.
 
 ## 1. Outcome and security boundary
 
