@@ -5,6 +5,8 @@ import {CouchClient,type Http} from '../src/couch-client';
 import {Device,settle} from './helpers';
 import {SyncFailure} from '../src/types';
 import {documentId,decodeBinary,encodeBinary,rawHash} from '../src/paths';
+import {CouchConfiguration} from '../src/couch-configuration';
+import {EncryptionSetup, generateRecoveryCode, createConfiguration, importRecoveryCode, CONFIGURATION_ID, type SetupIntent} from '../src/encryption-setup';
 const address=process.env.BETTERSYNC_TEST_SERVER;
 if(!address)throw new Error('Set BETTERSYNC_TEST_SERVER to a disposable local CouchDB instance.');
 const credentials={username:'bettersync-test',password:'local-ci-only'};
@@ -19,6 +21,52 @@ const http:Http=async(url,method,headers,body,responseType)=>{
   return responseType==='binary'?{status:response.status,arrayBuffer:await response.arrayBuffer()}:{status:response.status,json:await response.json()};
 };
 const client=()=>new CouchClient({url:'https://couchdb.test',database,...credentials},http);
+
+test('real CouchDB: encrypted setup, lost response, three clients and native tombstone refusal', async () => {
+  const setupDatabase = database + '-encryption';
+  const url = `${address}/${setupDatabase}`;
+  assert.equal((await fetch(url, {method: 'PUT', headers: {Authorization: auth}})).status, 201);
+  try {
+    let loseResponse = true, creates = 0;
+    const lossy: Http = async (target, method, headers, body, responseType) => {
+      const response = await http(target, method, headers, body, responseType);
+      if (method === 'PUT') {
+        creates++;
+        if (loseResponse && response.status === 201) { loseResponse = false; throw new Error('Synthetic lost response.'); }
+      }
+      return response;
+    };
+    const connection = {url: 'https://couchdb.test', database: setupDatabase, ...credentials};
+    const remote = new CouchConfiguration(connection, lossy);
+    await remote.assertEmpty(); assert.equal(await remote.getConfiguration(), null);
+    function installation() {
+      let intent: SetupIntent | null = null;
+      const values = new Map<string, string>();
+      const storage = {load: async () => structuredClone(intent), save: async (v: SetupIntent) => { intent = structuredClone(v); }};
+      const secrets = {get: async (id: string) => values.get(id) ?? null, set: async (id: string, code: string) => {values.set(id, code);}};
+      return {restart: () => new EncryptionSetup('wire-test', storage, secrets, remote), storage};
+    }
+    const a = installation(), b = installation(), c = installation(), code = generateRecoveryCode();
+    await assert.rejects(() => a.restart().createConfirmed(code));
+    assert.equal((await a.storage.load())?.phase, 'prepared');
+    await a.restart().resume(); await b.restart().join(code); await c.restart().join(code);
+    assert.equal(creates, 1);
+    const current = await remote.getConfiguration(); assert.ok(current?._rev);
+    assert.ok(!JSON.stringify(current).includes(code.split('.')[2]!));
+    await assert.rejects(() => remote.assertEmpty());
+    const other = await createConfiguration(await importRecoveryCode(generateRecoveryCode()));
+    await assert.rejects(() => remote.createConfiguration(other), (e: unknown) => e instanceof SyncFailure && e.kind === 'conflict');
+    assert.deepEqual(await remote.getConfiguration(), current);
+    // Native deletion is deliberately unsupported: never silently recreate config.
+    assert.equal((await fetch(`${url}/${encodeURIComponent(CONFIGURATION_ID)}?rev=${encodeURIComponent(current._rev)}`,
+      {method: 'DELETE', headers: {Authorization: auth}})).status, 200);
+    await assert.rejects(() => remote.getConfiguration());
+    await assert.rejects(() => remote.assertEmpty());
+    await assert.rejects(() => a.restart().resume());
+  } finally {
+    assert.equal((await fetch(url, {method: 'DELETE', headers: {Authorization: auth}})).status, 200);
+  }
+});
 test('real CouchDB: three clients, conflicts, restart, deletes, Unicode and stale writes',async()=>{
   const response=await fetch(`${address}/${database}`,{method:'PUT',headers:{Authorization:auth}});
   assert.equal(response.status,201);

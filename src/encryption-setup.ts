@@ -129,7 +129,8 @@ export class EncryptionSetup {
         if (configuration !== null) throw new Error('This database already has encryption configured. Join it using its recovery code.');
         await this.remote.assertEmpty();
       }
-      const secretName = 'bettersync-' + base64url(randomBytes(16));
+      // Obsidian SecretStorage accepts lowercase alphanumerics and dashes only.
+      const secretName = 'bettersync-' + Array.from(randomBytes(16), b => b.toString(16).padStart(2, '0')).join('');
       await this.persistSecret(secretName, code.trim());
       const intent: SetupIntent = {version: 1, binding: this.binding, vault: crypto.vaultId,
         secretName, phase: 'prepared', operation};
@@ -151,7 +152,7 @@ export class EncryptionSetup {
   }
   private validateIntent(intent: SetupIntent) {
     if (intent.version !== 1 || intent.binding !== this.binding || !['prepared', 'ready'].includes(intent.phase)
-      || !['create', 'join'].includes(intent.operation) || !/^bettersync-[A-Za-z0-9_-]{22}$/.test(intent.secretName))
+      || !['create', 'join'].includes(intent.operation) || !/^bettersync-[a-f0-9]{32}$/.test(intent.secretName))
       throw new EncryptionError();
     unbase64url(intent.vault, 16);
   }
