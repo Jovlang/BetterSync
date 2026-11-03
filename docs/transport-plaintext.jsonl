@@ -1,0 +1,9 @@
+{"threshold":-1,"count":20,"addedRttMs":0,"requests":1,"totalBytes":187113,"maxPageBytes":187113,"cryptoMs":0,"elapsedMs":6.760500000000093,"rss":110788608}
+{"threshold":-1,"count":20,"addedRttMs":50,"requests":1,"totalBytes":187113,"maxPageBytes":187113,"cryptoMs":0,"elapsedMs":57.734300000000076,"rss":111747072}
+{"threshold":-1,"count":20,"addedRttMs":100,"requests":1,"totalBytes":187113,"maxPageBytes":187113,"cryptoMs":0,"elapsedMs":107.19119999999998,"rss":112705536}
+{"threshold":-1,"count":200,"addedRttMs":0,"requests":1,"totalBytes":1870713,"maxPageBytes":1870713,"cryptoMs":0,"elapsedMs":24.31829999999991,"rss":124391424}
+{"threshold":-1,"count":200,"addedRttMs":50,"requests":1,"totalBytes":1870713,"maxPageBytes":1870713,"cryptoMs":0,"elapsedMs":91.90640000000008,"rss":139796480}
+{"threshold":-1,"count":200,"addedRttMs":100,"requests":1,"totalBytes":1870713,"maxPageBytes":1870713,"cryptoMs":0,"elapsedMs":143.49299999999994,"rss":135778304}
+{"threshold":-1,"count":1000,"addedRttMs":0,"requests":5,"totalBytes":9353558,"maxPageBytes":1870713,"cryptoMs":0,"elapsedMs":134.47960000000012,"rss":155398144}
+{"threshold":-1,"count":1000,"addedRttMs":50,"requests":5,"totalBytes":9353558,"maxPageBytes":1870713,"cryptoMs":0,"elapsedMs":418.56719999999996,"rss":145260544}
+{"threshold":-1,"count":1000,"addedRttMs":100,"requests":5,"totalBytes":9353558,"maxPageBytes":1870713,"cryptoMs":0,"elapsedMs":675.5992999999999,"rss":155955200}

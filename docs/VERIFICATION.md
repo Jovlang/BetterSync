@@ -47,7 +47,7 @@ The real CouchDB integration test was not run: no Docker executable or isolated 
 
 ## Release preparation — 2 November 2026
 
-With Node.js 24.19.0, `npm run verify` passed strict TypeScript checks, all 68 individual tests (none skipped), and the browser build. `BETTERSYNC_TEST_SERVER=http://127.0.0.1:15984 npm run test:integration` passed its real CouchDB three-client test against a disposable CouchDB 3.5 container. This supersedes the earlier local integration availability limitation. The container was removed after testing.
+With Node.js 24.19.0, `npm run verify` passed strict TypeScript checks, all 68 individual tests (none skipped), and the browser build. `BETTERSYNC_TEST_SERVER=http://localhost:5984 npm run test:integration` passed its real CouchDB three-client test against a disposable CouchDB 3.5 container. This supersedes the earlier local integration availability limitation. The container was removed after testing.
 
 Added configuration-folder regression checks cover inventory exclusion and rejection of reads, creation, replacement/deletion and incoming recovery before filesystem access, including case variants. GPL-3.0-only licensing and the bundled MIT dependency notice are included. Real-device acceptance and verification of the declared minimum Obsidian version remain outstanding. No release has been published by this preparation step.
 
@@ -106,3 +106,11 @@ Database passwords now migrate to verified SecretStorage references and are omit
 ## Plugin lifecycle regression coverage
 
 Added bundled-plugin tests using a minimal mocked Obsidian API. Disabling sync now stops the engine before secret access, including when SecretStorage is unavailable. Failed credential-reference persistence restores previous settings; successful migration writes no plaintext password to plugin data. npm run verify passes 134 tests and the browser build. These simulations do not replace real Obsidian lifecycle, UI cancellation, CouchDB or iPhone benchmark validation.
+
+## Initial-sync benchmark runner
+
+Added the isolated-loopback CouchDB comparison runner with paired alternating trials, synthetic fixtures, first-file/full-download timings, request counts and byte-equality checks. npm run verify passes 134 tests and the browser build. The runner typechecks but has NOT RUN against CouchDB in this session; no server is configured. Real Obsidian timing and iPhone memory remain outstanding.
+
+## Isolated disposable CouchDB validation
+
+Used a disposable CouchDB 3.5 container with synthetic credentials and no host mounts. Reproduce using docs/TESTING.md and compose.test.yml. Both real CouchDB integration tests passed, including encrypted three-client engine conflicts and deletion/restart. Ten paired 20-note benchmark trials completed at zero added latency: plaintext downloads 3 requests, encrypted downloads 23 requests. Download medians were approximately 17 ms plaintext and 124 ms encrypted. A single additional 50 ms per-request latency trial measured 193 ms plaintext and 1,462 ms encrypted. This single latency trial is smoke evidence, not a statistical result. The per-file attachment round trips materially affect small-vault latency; evaluate bounded inline ciphertext before schema freeze. Measurements use Node HTTP and simulated vaults, not real Obsidian or iPhone memory. No pre-existing container is required; the checked-in Compose configuration supplies the complete test environment.

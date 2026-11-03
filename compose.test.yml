@@ -1,0 +1,14 @@
+# Synthetic test environment only. No host vault mounts or external services.
+services:
+  couchdb:
+    image: couchdb:3.5
+    environment:
+      COUCHDB_USER: bettersync-test
+      COUCHDB_PASSWORD: local-ci-only
+    ports:
+      - "127.0.0.1:${BETTERSYNC_TEST_PORT:-15984}:5984"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5984/_up"]
+      interval: 2s
+      timeout: 5s
+      retries: 30

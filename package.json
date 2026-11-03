@@ -9,7 +9,8 @@
     "test": "node --import tsx --test tests/*.test.ts",
     "verify": "npm run check && npm test && npm run build",
     "test:integration": "node --import tsx --test tests/couchdb.integration.ts",
-    "benchmark:e2ee:codec": "node --import tsx tests/encryption-benchmark.ts"
+    "benchmark:e2ee:codec": "node --import tsx tests/encryption-benchmark.ts",
+    "benchmark:e2ee:sync": "node --import tsx tests/sync-benchmark.ts"
   },
   "dependencies": {
     "@noble/hashes": "^2.0.1"

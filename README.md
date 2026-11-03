@@ -38,6 +38,8 @@ E2EE implementation includes experimental crypto, recovery-code handling, resuma
 
 ## Development
 
+See [reproducible synthetic testing](docs/TESTING.md) for the self-contained disposable CouchDB configuration. No personal infrastructure is required.
+
 Node.js 22+:
 
 ```sh
