@@ -4,7 +4,7 @@ import type {VaultClient, Content} from './types';
 export class ObsidianVault implements VaultClient {
   private inventory=new Map<string,string>();
   constructor(private app:App) {}
-  private allowed(path:string):boolean {
+  allowed(path:string):boolean {
     const config=(this.app.vault.configDir??'.obsidian').normalize('NFC').toLowerCase().replace(/\/$/,'');
     const target=path.normalize('NFC').toLowerCase().replace(/\/$/,'');
     return syncPath(path) && target!==config && !target.startsWith(config+'/');

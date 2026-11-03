@@ -8,7 +8,7 @@ Small Obsidian plugin for synchronizing vault files and directories through one 
 
 1. Use a disposable test vault and a dedicated, empty CouchDB database.
 2. Copy `main.js` and `manifest.json` into `<vault>/.obsidian/plugins/bettersync/` on each device. Reload Obsidian and enable BetterSync under Community plugins. The Actions artifact contains these two files; create the `bettersync/` plugin folder yourself.
-3. Enter the HTTPS server URL, database, username and password. Test the connection, then enable Sync.
+3. Use Obsidian 1.11.4 or later. Enter the HTTPS server URL, database, username and password. Test the connection, select **Set up encryption**, save the recovery code outside the vault, then enable Sync. On other devices, enter the same recovery code.
 4. On the device containing your notes, confirm **Upload**. Start the other devices with empty vaults and confirm **Download**.
 5. Run [the three-device acceptance checklist](docs/ACCEPTANCE.md).
 
@@ -32,9 +32,9 @@ Use a dedicated CouchDB 3.x database exposed through valid HTTPS, with a databas
 
 This protocol is independent of LiveSync: **do not point it at a LiveSync database** or run another sync engine against the same test vault. Ordinary CouchDB compaction is fine. Do not purge notes or remove BetterSync's deletion-marker documents: offline clients need those markers.
 
-There is no end-to-end encryption. The server can read note contents, and credentials are stored in the installation's local Obsidian plugin data. Use a database-scoped account, protect the server, and do not commit or copy `data.json`.
+This development build enables draft end-to-end encryption after explicit setup. Recovery keys use Obsidian SecretStorage. Database passwords migrate to SecretStorage after verified write/readback; plugin data stores a secret reference. Use Show recovery code in settings to retrieve the vault key explicitly. Use a database-scoped account, protect the server, and do not commit or copy `data.json`.
 
-E2EE implementation includes experimental crypto, recovery-code handling, resumable key setup, Obsidian secret-storage, encrypted CouchDB transport, and integration with the existing sync engine under automated tests. The encrypted path is **not connected to the production setup UI** and does not protect this build's normal transfers. See [the implementation plan](docs/E2EE-PLAN.md) and [benchmark instructions](docs/E2EE-BENCHMARKS.md). The encrypted wire layout remains provisional pending small-file initial-sync and physical-iPhone memory measurements.
+E2EE implementation includes experimental crypto, recovery-code handling, resumable key setup, Obsidian secret-storage, encrypted CouchDB transport, and integration with the existing sync engine under automated tests. The draft encrypted path is connected to setup and startup. Existing plaintext installations are blocked and require a fresh local vault and database. The UI and lifecycle have not yet been validated inside real Obsidian clients. See [the implementation plan](docs/E2EE-PLAN.md) and [benchmark instructions](docs/E2EE-BENCHMARKS.md). The encrypted wire layout remains provisional pending small-file initial-sync and physical-iPhone memory measurements.
 
 ## Development
 

@@ -94,3 +94,15 @@ Added PersistentSetupStorage with serialized saves, isolated snapshots and publi
 ## Plugin setup persistence wiring — 3 November 2026
 
 The plugin now loads encryption setup intent and preserves it through its existing serialized saveData queue. Setup publication follows successful persistence, and queued ordinary saves retain the latest committed intent. Existing encrypted intent blocks database rebinding and plaintext startup until encrypted startup/UI integration is completed. npm run verify passes 129 tests and the browser build; these results do not establish real Obsidian lifecycle acceptance. Recovery-code UI and encrypted startup remain unfinished.
+
+## Draft encrypted startup and setup UI — 3 November 2026
+
+Connected recovery-code generation/import, backup confirmation, persisted setup resume and EncryptedRemote to plugin startup. Existing plaintext state is refused; custom configuration-folder exclusions apply before encrypted transfers. Retry can restart failed initialization. npm run verify passes 129 tests and the browser build. These tests do not exercise the new modal inside Obsidian. Database password migration, recovery-code export UI, real-device lifecycle verification, real CouchDB execution and pre-freeze performance/memory measurements remain pending. This is a disposable-vault development build, not an acceptance sign-off.
+
+## Credential storage and explicit recovery export
+
+Database passwords now migrate to verified SecretStorage references and are omitted from subsequent plugin-data snapshots. Replacement writes allocate a fresh reference so failed local persistence retains the previous credential. Added an explicit Show recovery code modal; no clipboard write occurs automatically. npm run verify passes 131 tests and the browser build. New tests cover reference isolation, failed readback and sanitized errors. Actual Obsidian UI, lifecycle persistence and iPhone behavior remain unverified; schema freeze and all real-device acceptance gates remain open.
+
+## Plugin lifecycle regression coverage
+
+Added bundled-plugin tests using a minimal mocked Obsidian API. Disabling sync now stops the engine before secret access, including when SecretStorage is unavailable. Failed credential-reference persistence restores previous settings; successful migration writes no plaintext password to plugin data. npm run verify passes 134 tests and the browser build. These simulations do not replace real Obsidian lifecycle, UI cancellation, CouchDB or iPhone benchmark validation.
