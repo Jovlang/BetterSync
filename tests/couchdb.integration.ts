@@ -10,6 +10,7 @@ import {EncryptedCouch} from '../src/encrypted-couch';
 import {EncryptedRemote} from '../src/encrypted-remote';
 import {syncPath} from '../src/paths';
 import {EncryptionSetup, generateRecoveryCode, createConfiguration, importRecoveryCode, CONFIGURATION_ID, type SetupIntent} from '../src/encryption-setup';
+import {freshEncryptedTree} from './encrypted-filesystem';
 const address=process.env.BETTERSYNC_TEST_SERVER;
 if(!address)throw new Error('Set BETTERSYNC_TEST_SERVER to a disposable local CouchDB instance.');
 const credentials={username:'bettersync-test',password:'local-ci-only'};
@@ -24,6 +25,26 @@ const http:Http=async(url,method,headers,body,responseType)=>{
   return responseType==='binary'?{status:response.status,arrayBuffer:await response.arrayBuffer()}:{status:response.status,json:await response.json()};
 };
 const client=()=>new CouchClient({url:'https://couchdb.test',database,...credentials},http);
+
+test('real CouchDB: fresh mixed-file encrypted upload/download materializes identical disk trees',async()=>{
+  for(const interrupted of [false,'poll','restart'] as const) {
+    const db:string=database+'-mixed-'+interrupted;
+    const url:string=`${address}/${db}`;
+    assert.equal((await fetch(url,{method:'PUT',headers:{Authorization:auth}})).status,201);
+    try {
+      const connection={url:'https://couchdb.test',database:db,...credentials};
+      const code=generateRecoveryCode(),key=await importRecoveryCode(code);
+      await new CouchConfiguration(connection,http).createConfiguration(await createConfiguration(key));
+      let attachmentReads=0;
+      const traced:Http=async(...args)=>{
+        if(args[4]==='binary') {assert.match(args[0],/\/content\?rev=/);attachmentReads++;}
+        return http(...args);
+      };
+      await freshEncryptedTree(async()=>EncryptedRemote.connect(connection,traced,await importRecoveryCode(code),syncPath),interrupted);
+      assert.ok(attachmentReads>0);
+    } finally {assert.equal((await fetch(url,{method:'DELETE',headers:{Authorization:auth}})).status,200);}
+  }
+});
 
 test('real CouchDB: encrypted setup, lost response, three clients and native tombstone refusal', async () => {
   const setupDatabase = database + '-encryption';

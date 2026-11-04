@@ -148,40 +148,56 @@ export class SyncEngine {
     await this.finishIncoming(doc.path);
   }
   private async finishIncoming(path:string):Promise<void> {
-    const state=this.store.state;
-    const operation=state.incoming[path];
-    if(!operation) return;
-    const {doc,expected}=operation;
-    if(doc.path!==path) throw new SyncFailure('data','The incoming path does not match its journal.');
-    if(Object.hasOwn(state.rejected??{},doc._id)) throw new SyncFailure('data','This record is quarantined.');
-    const desired:Content|null=this.remote.readContent ? await this.remote.readContent(doc) : doc.deleted ? null : doc.schema===3
-      ? await this.remote.getAttachment(doc)
-      : doc.schema===2 && !path.endsWith('/') && !path.endsWith('.md') ? decodeBinary(doc.content!) : doc.content!;
-    const desiredHash=hash(desired);
-    for(let attempt=0;attempt<8;attempt++) {
-      await this.vault.recoverIncoming?.(path,expected,async content=>{
-        this.dirty.add(await preserveConflict(this.vault,path,content,state.clientId));
-        this.hadConflict=true;
-        this.ui.notice(`Sync conflict in ${path}. Both versions were kept.`);
-      });
-      const local=await this.vault.read(path), current=hash(local);
-      if(current===desiredHash) {await this.accept(doc,desiredHash);return;}
-      if(current!==expected) {
-        if(local!==null) {
-          const copy=await preserveConflict(this.vault,path,local,state.clientId);
-          this.dirty.add(copy);
+    // Bounded diagnostic stages: never log the path, payload, raw exception or key.
+    let stage='journal-validation';
+    try {
+      const state=this.store.state;
+      const operation=state.incoming[path];
+      if(!operation) return;
+      const {doc,expected}=operation;
+      if(doc.path!==path) throw new SyncFailure('data','The incoming path does not match its journal.');
+      if(Object.hasOwn(state.rejected??{},doc._id)) throw new SyncFailure('data','This record is quarantined.');
+      stage='content-read';
+      const desired:Content|null=this.remote.readContent ? await this.remote.readContent(doc) : doc.deleted ? null : doc.schema===3
+        ? await this.remote.getAttachment(doc)
+        : doc.schema===2 && !path.endsWith('/') && !path.endsWith('.md') ? decodeBinary(doc.content!) : doc.content!;
+      const desiredHash=hash(desired);
+      for(let attempt=0;attempt<8;attempt++) {
+        stage='local-recovery';
+        await this.vault.recoverIncoming?.(path,expected,async content=>{
+          this.dirty.add(await preserveConflict(this.vault,path,content,state.clientId));
+          this.hadConflict=true;
+          this.ui.notice(`Sync conflict in ${path}. Both versions were kept.`);
+        });
+        stage='local-read';
+        const local=await this.vault.read(path), current=hash(local);
+        if(current===desiredHash) {stage='baseline-save';await this.accept(doc,desiredHash);return;}
+        if(current!==expected) {
+          stage='conflict-preservation';
+          if(local!==null) {
+            const copy=await preserveConflict(this.vault,path,local,state.clientId);
+            this.dirty.add(copy);
+          }
+          this.hadConflict=true;
+          this.ui.notice(`Sync conflict in ${path}. Both versions were kept.`);
+          this.ui.log('conflict detected');
         }
-        this.hadConflict=true;
-        this.ui.notice(`Sync conflict in ${path}. Both versions were kept.`);
-        this.ui.log('conflict detected');
+        this.expectedRemoteWrites.set(path,desiredHash);
+        stage='local-write';
+        if(await this.vault.compareAndSet(path,current,desired)) {
+          stage='baseline-save';
+          await this.accept(doc,desiredHash);this.ui.log('remote write applied');return;
+        }
+        this.expectedRemoteWrites.delete(path);
       }
-      this.expectedRemoteWrites.set(path,desiredHash);
-      if(await this.vault.compareAndSet(path,current,desired)) {
-        await this.accept(doc,desiredHash);this.ui.log('remote write applied');return;
-      }
-      this.expectedRemoteWrites.delete(path);
+      throw new SyncFailure('data','This note is changing too quickly. Sync will retry.');
+    } catch(error) {
+      const kind=error instanceof PersistenceFailure?'persistence':error instanceof SyncFailure?error.kind:'operation';
+      const code=error && typeof error==='object' && 'code' in error ? error.code : undefined;
+      const io=typeof code==='string' && ['ENOENT','EEXIST','EACCES','EPERM','ENOSPC','EIO','EBUSY','ENOTDIR','EISDIR'].includes(code)?` ${code}`:'';
+      this.ui.log(`incoming ${stage} failed (${kind}${io})`);
+      throw error;
     }
-    throw new SyncFailure('data','This note is changing too quickly. Sync will retry.');
   }
   private async accept(doc:FileDocument,digest:string|null):Promise<void> {
     this.store.state.files[doc.path]={rev:doc._rev!,hash:digest};
