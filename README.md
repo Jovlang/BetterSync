@@ -2,7 +2,7 @@
 
 Small Obsidian plugin for synchronizing vault files and directories through one self-hosted CouchDB database. Designed for desktop, laptop and phone, with no master client and no device registry.
 
-**Status: implemented MVP candidate, not yet device-validated.** The automated suite exercises three independent sync engines, including offline edits, conflicts and restart recovery. The ten acceptance tests on real desktop, MacBook and iPhone clients remain the release gate. No actual Obsidian client was available in the build environment. A real CouchDB integration test subsequently passed in GitHub Actions.
+**Status: 0.3.0 E2EE prerelease, not yet device-validated.** The automated suite exercises three independent sync engines, including offline edits, conflicts and restart recovery. The ten acceptance tests on real desktop, MacBook and iPhone clients remain the release gate. No actual Obsidian client was available in the build environment. A real CouchDB integration test subsequently passed in GitHub Actions.
 
 ## Install the test build
 
@@ -12,7 +12,7 @@ Small Obsidian plugin for synchronizing vault files and directories through one 
 4. On the device containing your notes, confirm **Upload**. Start the other devices with empty vaults and confirm **Download**.
 5. Run [the three-device acceptance checklist](docs/ACCEPTANCE.md).
 
-There is deliberately no first-time merge of two populated vaults. Canceling initial setup does not change either side. Retry can reopen the setup prompt. Resume after a confirmed setup is automatic.
+There is deliberately no first-time merge of two populated vaults. Canceling the transfer confirmation does not transfer notes; an already confirmed encryption setup may have created the database configuration. Retry can reopen the setup prompt. Resume after a confirmed setup is automatic.
 
 On iPhone, place the plugin files in the vault's plugin folder using a Mac/PC or an iOS file-management method that can access `.obsidian`; do not copy another installation's `data.json`. Community-plugin installation from an archive is not an App Store installation.
 
@@ -28,7 +28,7 @@ The normal states are **Synced**, **Syncing…**, **Offline**, **Conflict** and 
 
 ## Server requirements
 
-Use a dedicated CouchDB 3.x database exposed through valid HTTPS, with a database user permitted to read and write notes. Binary files use raw CouchDB attachments, uploaded atomically with metadata in a multipart request. Configure `chttpd.max_http_request_size` and reverse proxy request limits above 200 MiB plus multipart overhead. `couchdb.max_document_size` must accommodate Markdown JSON and any existing schema 2 records (which can exceed 267 MiB with base64 and JSON overhead); attachment bytes are separate from the JSON document-size limit. Existing schema 2 binary records remain readable and become schema 3 on their next edit. New binary records appear in the changes feed as small attachment stubs. Transfers are buffered, not streaming: uploads hold both the source bytes and a multipart buffer, and Obsidian may make additional internal copies. Downloads and guarded filesystem operations also require full buffers. The 200 MiB protocol limit is not a promise that a 200 MiB transfer fits in iPhone memory; see [memory constraints](docs/PROTOCOL.md#transport-and-memory). Create the database outside this plugin; BetterSync does not create databases, configure CouchDB, or change permissions. The URL can include a reverse-proxy subpath.
+Use a dedicated CouchDB 3.x database exposed through valid HTTPS, with a database user permitted to read and write notes. The draft encrypted protocol stores files up to 64 KiB inline as authenticated ciphertext and larger files as encrypted attachments. Filenames, paths, modification times, hashes and exact plaintext sizes are encrypted. Configure request limits above the intended attachment size plus encryption and multipart overhead. Transfers are buffered, not streaming; source, ciphertext, multipart, native HTTP and recovery buffers can coexist. The 200 MiB protocol limit is not a promise that an encrypted transfer fits in iPhone memory. See [the transport decision and remaining gates](docs/TRANSPORT-DECISION.md). Create the database outside this plugin; BetterSync does not create databases, configure CouchDB, or change permissions. The URL can include a reverse-proxy subpath.
 
 This protocol is independent of LiveSync: **do not point it at a LiveSync database** or run another sync engine against the same test vault. Ordinary CouchDB compaction is fine. Do not purge notes or remove BetterSync's deletion-marker documents: offline clients need those markers.
 

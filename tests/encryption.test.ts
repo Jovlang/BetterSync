@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {hkdfSync, createHmac, createDecipheriv} from 'node:crypto';
-import {VaultCrypto, base64url, unbase64url, frame, EncryptionError, CRYPTO_DOMAIN} from '../src/crypto';
+import {VaultCrypto, base64urlLength, base64url, unbase64url, frame, EncryptionError, CRYPTO_DOMAIN} from '../src/crypto';
 import {encryptRecord, decryptRecord, decryptMetadata, validateEncryptedRecord, MAX_METADATA_BYTES, type RecordInput} from '../src/encrypted-protocol';
 import {syncPath} from '../src/paths';
 
@@ -96,7 +96,7 @@ test('wrong key, vault, excluded custom config directory and modified metadata f
   await assert.rejects(() => decryptMetadata(c, config.record, p => !p.startsWith('custom-config/')), EncryptionError);
 });
 
-test('every metadata and content ciphertext byte is authenticated; truncated bodies rejected', async () => {
+test('metadata tampering and sampled attachment corruption are rejected, including truncation', async () => {
   const c = await context(), {record, body} = await encryptRecord(c, input());
   const metadata = unbase64url(record.metadata, 16, MAX_METADATA_BYTES + 16);
   for (let i = 0; i < metadata.length; i++) {
@@ -135,4 +135,22 @@ test('unsafe paths and invalid logical shapes cannot be encrypted', async () => 
     await assert.rejects(() => encryptRecord(c, input(path)), EncryptionError);
   await assert.rejects(() => encryptRecord(c, {...input(), deleted: true}), EncryptionError);
   await assert.rejects(() => encryptRecord(c, {...input(), bytes: undefined}), EncryptionError);
+});
+
+test('allocation-free base64url validation rejects every nonzero unused trailing bit', () => {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  for (const size of [0, 1, 2, 3, 255, 256, 257, 65552]) {
+    const bytes = Uint8Array.from({length: size}, (_, i) => i % 256);
+    const encoded = Buffer.from(bytes).toString('base64url');
+    assert.equal(base64urlLength(encoded, size), size);
+    assert.deepEqual(unbase64url(encoded, size), bytes);
+    const unused = encoded.length % 4 === 2 ? 15 : encoded.length % 4 === 3 ? 3 : 0;
+    for (let bits = 1; bits <= unused; bits++) {
+      const last = alphabet.indexOf(encoded.slice(-1));
+      const alternate = encoded.slice(0, -1) + alphabet[last | bits];
+      assert.throws(() => base64urlLength(alternate, size), EncryptionError);
+      assert.throws(() => unbase64url(alternate, size), EncryptionError);
+    }
+    assert.throws(() => base64urlLength(encoded, size + 1), EncryptionError);
+  }
 });

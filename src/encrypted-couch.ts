@@ -1,4 +1,4 @@
-/** Draft attachment transport; not yet wired into the sync engine. */
+/** Draft hybrid transport used by the encrypted remote adapter. */
 import type {Connection, Http} from './couch-client';
 import {CouchHttp} from './couch-http';
 import {CouchConfiguration} from './couch-configuration';
@@ -37,7 +37,8 @@ export class EncryptedCouch {
     return record;
   }
   async metadata(value: unknown) {
-    const record = await this.inspect(value);
+    const record = validateEncryptedRecord(value);
+    if (!record._rev) invalid();
     return {record, metadata: await decryptMetadata(this.crypto, record, this.allowedPath)};
   }
   async get(path: string): Promise<EncryptedRecord | null> {

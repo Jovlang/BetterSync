@@ -22,7 +22,7 @@ Three or more independent Obsidian installations synchronize the same vault thro
 
 ## Excluded
 
-The active Obsidian configuration folder, `.obsidian`, local recovery trash (`.trash`), settings, plugins, themes, workspace state, encryption, P2P, WebRTC, S3, alternate backends, device registries, revision-selection UI, automatic text merging, version-history UI, chunks, compression, selective sync, profiles, compatibility modes and LiveSync migration.
+The active Obsidian configuration folder, `.obsidian`, local recovery trash (`.trash`), settings, plugins, themes, workspace state, P2P, WebRTC, S3, alternate backends, device registries, revision-selection UI, automatic text merging, version-history UI, chunks, compression, selective sync, profiles, compatibility modes and LiveSync migration.
 
 ## Safety rules
 
@@ -57,6 +57,6 @@ All ten scenarios in `ACCEPTANCE.md` must pass on three **real** Obsidian client
 
 Apply the anti-cruft rule to future changes: if the software can make a safe decision itself, do not add another setting or mode.
 
-## E2EE work in progress — 3 November 2026
+## E2EE work in progress — 4 November 2026
 
-The user authorized E2EE implementation after reviewing `E2EE-PLAN.md`. Encryption remains unavailable in the current sync runtime; its exclusion above describes that runtime, not the newly authorized work. The first increment adds experimental cryptographic primitives, a strict encrypted record codec and benchmark fixtures without changing active database formats or setup behavior. Schema 4 must not be frozen before comparative small-file initial-sync benchmarks and physical-iPhone peak-memory measurements. Preserve one sync model and the existing real-device acceptance gate.
+The user authorized E2EE implementation after reviewing `E2EE-PLAN.md`. The development runtime now requires encrypted setup, using Obsidian SecretStorage and a recovery code. Existing plaintext installations require fresh local vaults and databases; there is no in-place migration or plaintext fallback. The fixed hybrid candidate stores small encrypted content inline and larger content as revision-qualified attachments, behind the same sync engine. Schema 4 remains provisional pending the remaining transport, security and physical-iPhone memory gates in `TRANSPORT-DECISION.md`. The 200 MiB protocol bound is not validated encrypted mobile capacity. Preserve one sync model and the existing real-device acceptance gate.

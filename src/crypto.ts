@@ -1,4 +1,4 @@
-/** Experimental E2EE primitives. Not connected to the sync transport yet. */
+/** Fixed draft E2EE primitives shared by setup and transport. */
 import {syncPath} from './paths';
 
 export class EncryptionError extends Error {
@@ -22,15 +22,25 @@ export function base64url(bytes: Uint8Array): string {
   for (let i = 0; i < bytes.length; i += 8192) text += String.fromCharCode(...bytes.subarray(i, i + 8192));
   return btoa(text).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
-/** Bounds checked before allocation, and noncanonical encodings rejected. */
-export function unbase64url(value: unknown, min: number, max = min): Uint8Array<ArrayBuffer> {
+/** Validate canonical unpadded base64url without allocating decoded ciphertext. */
+export function base64urlLength(value: unknown, min: number, max = min): number {
   if (typeof value !== 'string' || value.length > Math.ceil(max * 4 / 3)
     || !/^[A-Za-z0-9_-]*$/.test(value) || value.length % 4 === 1) throw new EncryptionError();
+  const length = Math.floor(value.length * 3 / 4);
+  const remainder = value.length % 4;
+  const last = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'.indexOf(value.slice(-1));
+  // Unused trailing bits must be zero, otherwise multiple strings encode the same bytes.
+  if (length < min || length > max || (remainder === 2 && (last & 15) !== 0)
+    || (remainder === 3 && (last & 3) !== 0)) throw new EncryptionError();
+  return length;
+}
+/** Bounds and canonical encoding checked before allocation. */
+export function unbase64url(value: unknown, min: number, max = min): Uint8Array<ArrayBuffer> {
+  const length = base64urlLength(value, min, max);
   try {
-    const raw = atob(value.replace(/-/g, '+').replace(/_/g, '/'));
-    if (raw.length < min || raw.length > max) throw new EncryptionError();
-    const bytes = Uint8Array.from(raw, c => c.charCodeAt(0));
-    if (base64url(bytes) !== value) throw new EncryptionError();
+    const raw = atob((value as string).replace(/-/g, '+').replace(/_/g, '/'));
+    const bytes = new Uint8Array(length);
+    for (let i = 0; i < length; i++) bytes[i] = raw.charCodeAt(i);
     return bytes;
   } catch { throw new EncryptionError(); }
 }

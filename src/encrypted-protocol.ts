@@ -1,5 +1,5 @@
-/** Provisional attachment candidate. No network or filesystem effects. */
-import {base64url, unbase64url, randomBytes, VaultCrypto, EncryptionError, CRYPTO_DOMAIN} from './crypto';
+/** Provisional hybrid encrypted codec. No network or filesystem effects. */
+import {base64urlLength, base64url, unbase64url, randomBytes, VaultCrypto, EncryptionError, CRYPTO_DOMAIN} from './crypto';
 import {MAX_FILE_BYTES, rawHash, syncPath} from './paths';
 
 export const MAX_METADATA_BYTES = 16 * 1024;
@@ -57,7 +57,7 @@ export function validateEncryptedRecord(value: unknown): EncryptedRecord {
   if (d._rev !== undefined) result._rev = d._rev as string;
   if(d.inline!==undefined) {
     if(d._attachments!==undefined)fail();
-    unbase64url(d.inline,16,INLINE_FILE_BYTES+16);result.inline=d.inline as string;
+    base64urlLength(d.inline,16,INLINE_FILE_BYTES+16);result.inline=d.inline as string;
   }
   if (d._attachments !== undefined) {
     const attachments = object(d._attachments); keys(attachments, ['content']);
@@ -102,7 +102,7 @@ export async function decryptMetadata(crypto: VaultCrypto, value: unknown, allow
     // The authenticated plaintext size deterministically selects representation.
     // Moving ciphertext between representations therefore cannot bypass authentication.
     if(hasBody && metadata.size<=INLINE_FILE_BYTES) {
-      if(record.inline===undefined||record._attachments||unbase64url(record.inline,16,INLINE_FILE_BYTES+16).length!==metadata.size+16)fail();
+      if(record.inline===undefined||record._attachments||base64urlLength(record.inline,16,INLINE_FILE_BYTES+16)!==metadata.size+16)fail();
     } else if(hasBody) {
       if(record.inline!==undefined||!record._attachments||record._attachments.content.length!==metadata.size+16)fail();
     } else if(record.inline!==undefined||record._attachments)fail();
