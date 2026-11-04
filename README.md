@@ -2,7 +2,7 @@
 
 Small Obsidian plugin for synchronizing vault files and directories through one self-hosted CouchDB database. Designed for desktop, laptop and phone, with no master client and no device registry.
 
-**Status: 0.3.0 E2EE prerelease, not yet device-validated.** The automated suite exercises three independent sync engines, including offline edits, conflicts and restart recovery. The ten acceptance tests on real desktop, MacBook and iPhone clients remain the release gate. No actual Obsidian client was available in the build environment. A real CouchDB integration test subsequently passed in GitHub Actions.
+**Status: 0.3.1 E2EE prerelease, not yet device-validated.** The automated suite exercises three independent sync engines, including offline edits, conflicts and restart recovery. The ten acceptance tests on real desktop, MacBook and iPhone clients remain the release gate. Real-device testing has recorded an intermittent initial-download stall. See [the acceptance checklist](docs/ACCEPTANCE.md) for the current status.
 
 ## Install the test build
 
