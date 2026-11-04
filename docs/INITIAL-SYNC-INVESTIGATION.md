@@ -1,24 +1,72 @@
-# Schema-4 initial materialization regression
+# Schema-4 initial materialization investigation
 
-Status: **release-blocking, unresolved on the real Mac**. Do not mark initial-sync acceptance passed from Markdown arrival or a later manual Retry alone.
+**A real-device intermittent initial-materialization stall was observed once on Mac. It has not yet been reproduced, and platform specificity is unproven.** Initial-sync acceptance remains blocked.
 
-The reported non-Markdown files were present in the destination's durable incoming journal while the UI remained in Sync error for minutes. Manual Retry subsequently materialized them. This establishes arrival through encrypted record validation and journal persistence; it rules out permanent omission during source scanning/upload for those records. It does not identify the original exception or prove unattended recovery.
+## Observed evidence
 
-Read-only source inspection found 24 ordinary files and one directory, with all 25 entries in saved sync baselines and no pending/rejected source entries. The observed source categories were 18 Markdown files, five small SVGs, one larger JPG and one directory. Those are 25 expected file/directory records, **plus** the separate configuration record (also schema 4). A reported count of 25 schema-4 documents therefore needs clarification: does it exclude configuration? Saved source baselines are not an independent server inventory. The actual server and destination byte comparison remains outstanding.
+- One real Mac initial encrypted sync materialized 12 of 18 Markdown files before stalling.
+- Six Markdown files, five SVGs and one JPG remained in the durable incoming journal while the UI stayed in Sync error for minutes.
+- Manual Retry subsequently materialized all remaining entries. The original exception was not captured.
+- The same encrypted dataset completed on a physical iPhone. This demonstrates that the dataset and general schema-4 paths can complete on a physical client; it does not establish a Mac-only defect or rule out an iPhone stall.
+- Synthetic filesystem, interrupted-write, normal-poll recovery, restart recovery and isolated real-CouchDB integration tests pass. They have not reproduced the observed stall and do not replace real-device acceptance.
 
-## Code and synthetic evidence
+The pending journals establish receipt and durable retention of these records. Successful Retry establishes that their content could subsequently be fetched, authenticated and materialized. Neither identifies the original failing operation. The affected set includes Markdown and non-Markdown files; there is no evidence that extension or inline/attachment representation triggered the stall.
 
-- The adapter recursively lists files without an extension whitelist. Only documented path exclusions apply.
-- The codec selects inline storage by plaintext byte length, independent of extension. Non-Markdown inline bytes and attachment bytes use the same raw-byte materialization path.
-- New tests exercise the real ObsidianVault implementation against a synthetic filesystem, rather than MemoryVault alone: Markdown, nested SVG, arbitrary invalid-UTF-8 binary, a 96 KiB synthetic JPG-named binary, nested directories and an empty directory.
-- Fresh encrypted upload/download asserts the complete tree, exact file bytes, encrypted feed layout, durable journals and revision-qualified attachment retrieval against isolated real CouchDB.
-- Injected copy failures leave ciphertext journal entries, display Sync error and recover on the next normal tick without calling Retry. A separate case reloads the serialized journal and recovers after restart.
-- These tests do not reproduce the reported minutes-long Mac stall. They are not real-device acceptance.
+Platform specificity, determinism, recurrence on the same Mac, and the root cause are unknown. Engine state, filesystem behavior, Obsidian lifecycle and polling are investigation targets, not established causes. Do not call this a confirmed Mac runtime defect.
 
-## Capture the missing evidence
+Read-only source inspection found 24 ordinary files and one directory, all represented in saved source baselines. There are 25 expected file/directory records plus a separate configuration record, which also uses schema 4. Clarify whether the reported server count excludes configuration. Source baselines are not an independent server inventory; full source/server/destination byte comparison remains outstanding.
 
-`scripts/trace-encrypted-tree.js` is a read-only developer-console diagnostic for the running client. It uses the existing authenticated remote, never prints keys, credentials, URLs, note bodies or hashes, and does not mutate files, records or checkpoints. Its output includes paths and sizes; review it before sharing. Run it on the source and destination to compare every supported local entry with authenticated remote bytes. A complete result must have no rejected records and `equivalent: true` on both clients. Account for concurrent edits when comparing snapshots.
+## Repeated real-device attempts
 
-If the stall recurs, run it **before Retry**. Preserve the bounded flags for poll scheduling, blocked/stopped engine and running cycle, plus pending journal paths. The diagnostic build additionally logs the failing incoming stage (content-read, local-recovery, local-read, conflict-preservation, local-write or baseline-save), a fixed failure category and optionally a whitelisted filesystem error code. Raw exceptions, paths and payloads are never included in those logs.
+Use a disposable acceptance database and a fresh destination test vault for each initial-download attempt, with the diagnostic build active. Keep the encrypted dataset fixed within a series and record build identity and platform/app versions. Never reset a personal vault or run the integration-test suite against an acceptance database. Do not delete the evidence from a stalled run before capturing it.
 
-No SVG/JPG-specific behavior, transport change or speculative recovery fix has been added. Identify the original failure and verify automatic recovery plus source/destination byte equality before clearing this blocker. Never run the integration-test suite against the acceptance vault database.
+For each run record bounded observations only:
+
+- completion or stall, records materialized, pending incoming count;
+- incoming failure stage, fixed failure category, whitelisted filesystem error code if present;
+- engine blocked, stopped and running-cycle flags;
+- whether a poll was scheduled and whether its callback and a new cycle actually started;
+- whether journal/state persistence completed after the failure;
+- unattended observation duration, eventual recovery, and whether manual Retry was used.
+
+Count files and directories separately. A saved baseline count is not by itself proof of filesystem materialization. Treat unavailable observations as UNCAPTURED, not false or successful. Ordinary diagnostics must not contain plaintext bodies, credentials, recovery material, raw exceptions or unbounded paths.
+
+If a stall occurs:
+
+1. Do not immediately click Retry. Capture read-only state first.
+2. Verify pending journal envelopes against authenticated remote contents, including exact-revision attachment retrieval. Do not mutate journals, baselines or checkpoints during inspection.
+3. Observe whether unattended polling and persistence progress; record the duration and outcome without assuming a scheduled timer actually fired.
+4. Only then use Retry if needed, recording its outcome separately from automatic recovery.
+5. Compare the complete supported source/destination tree and exact file bytes before declaring that attempt complete.
+
+## Current diagnostic capabilities and gaps
+
+The diagnostic build logs bounded incoming failure stages and categories, with only whitelisted filesystem error codes. It does not log raw errors, paths or payloads in those messages.
+
+The read-only developer-console script in scripts/trace-encrypted-tree.js compares local entries with authenticated remote contents and reports engine flags and whether a timer handle exists. Its explicit tree report includes paths and sizes: review locally before sharing; do not use it as ordinary diagnostic logging. Run it on both source and destination and account for concurrent edits. It does not modify files, records, checkpoints or retry state.
+
+A timer handle does not prove a poll fired. The current script does not capture poll-start history or persistence-completion history. Those observations must be captured through bounded instrumentation before a repeated-run series can support conclusions about automatic recovery. Current-state inspection after Retry cannot reconstruct the missing original exception.
+
+## Run ledger and interpretation
+
+| Attempt | Platform | Outcome | Materialized before stall | Pending files | Recovery | Original failure |
+|---|---|---|---|---|---|---|
+| Reported initial attempt | Mac | Stall observed | 12 of 18 Markdown files; directory count uncaptured | 12 (6 Markdown, 5 SVG, 1 JPG) | Manual Retry completed remaining entries | UNCAPTURED |
+| Reported same-dataset attempt | iPhone | Completed | Not applicable | None reported on completion | No stall reported | Not applicable |
+
+No subsequent fresh Mac attempts have been recorded in this investigation. Current evidence: **1 stall observed across 1 reported fresh real-Mac initial-sync attempt**. Append every subsequent attempt, including clean runs, and report the observed count as “1 stall observed across N fresh real-Mac initial-sync attempts” if no additional stalls occur. Do not infer a failure probability from a small sample.
+
+Clean runs increase confidence but do not erase or explain the original event. Until explained, retain the classification intermittent/unreproduced regression. iPhone success lowers the priority of explanations requiring a universally broken dataset/protocol; it does not establish platform specificity.
+
+## Acceptance and preservation
+
+Keep initial-sync acceptance blocked until evidence supports either:
+
+1. reproduction, root cause and a verified fix with regression coverage; or
+2. repeated real-device runs and captured diagnostics providing sufficient confidence in automatic recovery, with the transient failure mode safely observable and recoverable.
+
+Repeated clean runs alone do not establish the second outcome. Document the evidence and remaining uncertainty rather than choosing an arbitrary passing-run count.
+
+Do not add speculative retry behavior or extension-specific handling. Preserve durable incoming journals: never advance an applied baseline or discard an unapplied operation. A feed checkpoint may advance only when each earlier record is applied or durably retained for replay under the existing journal contract; it must never cause an unapplied record to be skipped or lost.
+
+An initial sync may encounter a transient failure, but it must never silently lose data or remain indefinitely stalled without either automatic recovery or a diagnosable error state.
