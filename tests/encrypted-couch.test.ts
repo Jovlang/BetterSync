@@ -11,7 +11,7 @@ import {fixture, connection, input} from './encrypted-wire';
 
 test('three clients exchange encrypted multipart Markdown and bytes without plaintext HTTP metadata', async () => {
   const {wire, client: a, connect, code} = await fixture(), b = await connect(), c = await connect();
-  const source = input(), saved = await a.put(source);
+  const source = input(undefined, 'synthetic confidential contents'.repeat(3000)), saved = await a.put(source);
   for (const client of [b, c]) {
     const record = await client.get(source.path); assert.ok(record);
     assert.deepEqual((await client.download(record)).bytes, source.bytes);
@@ -26,7 +26,7 @@ test('three clients exchange encrypted multipart Markdown and bytes without plai
 test('zero-byte files use encrypted attachments; directories and deletion markers do not', async () => {
   const {client, wire} = await fixture();
   const empty = await client.put(input('empty.md', ''));
-  assert.equal(empty._attachments!.content.length, 16);
+  assert.equal(empty._attachments, undefined); assert.ok(empty.inline);
   assert.equal((await client.download(empty)).bytes!.byteLength, 0);
   const directory = await client.put({path: 'empty/', deleted: false, mtime: 0});
   assert.equal(directory._attachments, undefined);
@@ -53,11 +53,12 @@ test('409 never triggers refetch or overwrite; accepted lost response is recover
 
 test('serialized envelopes pin exact revisions across offline restart and reject unavailable or corrupted bytes', async () => {
   const {client, wire, connect} = await fixture();
-  const saved = await client.put(input()), journal = JSON.parse(JSON.stringify(saved));
+  const large = input(undefined,'large'.repeat(15000));
+  const saved = await client.put(large), journal = JSON.parse(JSON.stringify(saved));
   await client.put(input(undefined, 'later bytes'), saved._rev);
   wire.offline = true; await assert.rejects(() => client.download(journal)); wire.offline = false;
   const restarted = await connect();
-  assert.deepEqual((await restarted.download(journal)).bytes, input().bytes);
+  assert.deepEqual((await restarted.download(journal)).bytes, large.bytes);
   wire.corruptBody = true; await assert.rejects(() => restarted.download(journal)); wire.corruptBody = false;
   wire.bodies.delete(saved._id + '@' + saved._rev);
   const before = wire.requests.length;

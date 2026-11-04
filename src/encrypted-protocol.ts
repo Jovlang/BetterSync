@@ -3,6 +3,7 @@ import {base64url, unbase64url, randomBytes, VaultCrypto, EncryptionError, CRYPT
 import {MAX_FILE_BYTES, rawHash, syncPath} from './paths';
 
 export const MAX_METADATA_BYTES = 16 * 1024;
+export const INLINE_FILE_BYTES = 64 * 1024;
 export const MAX_PATH_BYTES = 4096; // Provisional bound, subject to schema review.
 export interface LogicalMetadata {
   path: string; kind: 'file' | 'directory'; deleted: boolean; mtime: number;
@@ -11,6 +12,7 @@ export interface LogicalMetadata {
 export interface EncryptedRecord {
   _id: string; _rev?: string; schema: 4; protocol: typeof CRYPTO_DOMAIN; vault: string;
   salt: string; nonce: string; metadata: string;
+  inline?: string;
   _attachments?: {content: {stub: true; content_type: 'application/octet-stream'; length: number}};
 }
 export interface RecordInput {path: string; deleted: boolean; mtime: number; bytes?: ArrayBuffer}
@@ -44,7 +46,7 @@ function validateMetadata(value: unknown): LogicalMetadata {
 /** Produces a bounded owned snapshot, never returns the caller's mutable object. */
 export function validateEncryptedRecord(value: unknown): EncryptedRecord {
   const d = object(value);
-  keys(d, ['_id', '_rev', 'schema', 'protocol', 'vault', 'salt', 'nonce', 'metadata', '_attachments']);
+  keys(d, ['_id', '_rev', 'schema', 'protocol', 'vault', 'salt', 'nonce', 'metadata', 'inline', '_attachments']);
   if (d.schema !== 4 || d.protocol !== CRYPTO_DOMAIN || typeof d._id !== 'string' || !d._id.startsWith('e4:')) fail();
   unbase64url(d._id.slice(3), 32);
   if (d._rev !== undefined && (typeof d._rev !== 'string' || !/^[1-9][0-9]*-[A-Za-z0-9]+$/.test(d._rev) || d._rev.length > 256)) fail();
@@ -53,6 +55,10 @@ export function validateEncryptedRecord(value: unknown): EncryptedRecord {
   const result: EncryptedRecord = {_id: d._id, schema: 4, protocol: CRYPTO_DOMAIN, vault: d.vault as string,
     salt: d.salt as string, nonce: d.nonce as string, metadata: d.metadata as string};
   if (d._rev !== undefined) result._rev = d._rev as string;
+  if(d.inline!==undefined) {
+    if(d._attachments!==undefined)fail();
+    unbase64url(d.inline,16,INLINE_FILE_BYTES+16);result.inline=d.inline as string;
+  }
   if (d._attachments !== undefined) {
     const attachments = object(d._attachments); keys(attachments, ['content']);
     const a = object(attachments.content); keys(a, ['stub', 'content_type', 'length', 'digest', 'revpos']);
@@ -80,7 +86,8 @@ export async function encryptRecord(crypto: VaultCrypto, input: RecordInput): Pr
   const sealed = await crypto.seal(id, salt, 'metadata', encoder.encode(JSON.stringify(metadata)).buffer);
   const record: EncryptedRecord = {_id: id, schema: 4, protocol: CRYPTO_DOMAIN, vault: crypto.vaultId,
     salt, nonce: sealed.nonce, metadata: base64url(new Uint8Array(sealed.bytes))};
-  if (body) record._attachments = {content: {stub: true, content_type: 'application/octet-stream', length: body.byteLength}};
+  if(body && bytes!.byteLength<=INLINE_FILE_BYTES) {record.inline=base64url(new Uint8Array(body));body=undefined;}
+  else if (body) record._attachments = {content: {stub: true, content_type: 'application/octet-stream', length: body.byteLength}};
   return {record: validateEncryptedRecord(record), body};
 }
 
@@ -92,7 +99,13 @@ export async function decryptMetadata(crypto: VaultCrypto, value: unknown, allow
     const metadata = validateMetadata(JSON.parse(decoder.decode(bytes)));
     if (!allowedPath(metadata.path) || await crypto.documentId(metadata.path) !== record._id) fail();
     const hasBody = metadata.kind === 'file' && !metadata.deleted;
-    if (hasBody !== !!record._attachments || (hasBody && record._attachments!.content.length !== metadata.size + 16)) fail();
+    // The authenticated plaintext size deterministically selects representation.
+    // Moving ciphertext between representations therefore cannot bypass authentication.
+    if(hasBody && metadata.size<=INLINE_FILE_BYTES) {
+      if(record.inline===undefined||record._attachments||unbase64url(record.inline,16,INLINE_FILE_BYTES+16).length!==metadata.size+16)fail();
+    } else if(hasBody) {
+      if(record.inline!==undefined||!record._attachments||record._attachments.content.length!==metadata.size+16)fail();
+    } else if(record.inline!==undefined||record._attachments)fail();
     return metadata;
   } catch { throw new EncryptionError(); }
 }
@@ -102,6 +115,12 @@ export async function decryptRecord(crypto: VaultCrypto, value: unknown, body: A
   allowedPath: (path: string) => boolean): Promise<{metadata: LogicalMetadata; bytes?: ArrayBuffer}> {
   const record = validateEncryptedRecord(value);
   const metadata = await decryptMetadata(crypto, record, allowedPath);
+  if(record.inline!==undefined) {
+    if(body!==undefined)fail();
+    const bytes=await crypto.open(record._id,record.salt,'content',metadata.contentNonce!,unbase64url(record.inline,16,INLINE_FILE_BYTES+16).buffer);
+    if(bytes.byteLength!==metadata.size||rawHash(bytes)!==metadata.hash)fail();
+    return {metadata,bytes};
+  }
   if (record._attachments) {
     if (!(body instanceof ArrayBuffer) || body.byteLength !== record._attachments.content.length) fail();
     const bytes = await crypto.open(record._id, record.salt, 'content', metadata.contentNonce!, body);

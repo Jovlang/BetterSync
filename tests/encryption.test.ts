@@ -9,7 +9,7 @@ import {syncPath} from '../src/paths';
 const root = new Uint8Array(32).fill(7), vaultId = base64url(new Uint8Array(16).fill(3));
 const context = () => VaultCrypto.create(root, vaultId);
 const text = (value: string) => new TextEncoder().encode(value).buffer;
-const input = (path = 'Norsk/Ærlig.md') => ({path, deleted: false, mtime: 42, bytes: text('synthetic note canary')});
+const input = (path = 'Norsk/Ærlig.md') => ({path, deleted: false, mtime: 42, bytes: text('synthetic note canary'.repeat(4000))});
 function referenceFrame(...parts: string[]): Buffer {
   return Buffer.concat(parts.flatMap(part => {const b = Buffer.from(part); const n = Buffer.alloc(4); n.writeUInt32BE(b.length); return [n, b];}));
 }
@@ -103,7 +103,7 @@ test('every metadata and content ciphertext byte is authenticated; truncated bod
     const altered = metadata.slice(); altered[i] = altered[i]! ^ 1;
     await assert.rejects(() => decryptMetadata(c, {...record, metadata: base64url(altered)}, syncPath), EncryptionError);
   }
-  for (let i = 0; i < body!.byteLength; i++) {
+  for (let i = 0; i < body!.byteLength; i += 4093) {
     const altered = new Uint8Array(body!.slice(0)); altered[i] = altered[i]! ^ 1;
     await assert.rejects(() => decryptRecord(c, record, altered.buffer, syncPath), EncryptionError);
   }

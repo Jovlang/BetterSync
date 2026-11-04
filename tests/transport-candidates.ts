@@ -1,3 +1,4 @@
+import {base64url,unbase64url} from '../src/crypto';
 /** Isolated representation experiment. No production protocol/settings changes. */
 import {randomUUID} from 'node:crypto';
 import {generateRecoveryCode,importRecoveryCode} from '../src/encryption-setup';
@@ -10,7 +11,7 @@ const auth='Basic '+Buffer.from('bettersync-test:local-ci-only').toString('base6
 const headers={Authorization:auth,'Content-Type':'application/json'};
 const crypto=await importRecoveryCode(generateRecoveryCode());
 const records=[];
-for(const fixture of smallNotes(1000))records.push({fixture,...await encryptRecord(crypto,{...fixture,mtime:0,deleted:false})});
+for(const fixture of smallNotes(1000)){const encrypted=await encryptRecord(crypto,{...fixture,mtime:0,deleted:false});records.push({fixture,...encrypted,body:encrypted.body??unbase64url(encrypted.record.inline!,16,65552).buffer});}
 for(const threshold of (process.argv.length>2?process.argv.slice(2).map(Number):[-1,0,16384,65536,262144])) {
   if(![-1,0,16384,65536,262144].includes(threshold))throw new Error('Invalid candidate');
   const db='bettersync-candidates-'+randomUUID(),root=new URL(db+'/',base);
@@ -19,7 +20,7 @@ for(const threshold of (process.argv.length>2?process.argv.slice(2).map(Number):
     // Seed without injected latency; this experiment measures initial download only.
     for(let start=0;start<records.length;start+=100) {
       const docs=records.slice(start,start+100).map(({record,body,fixture})=>{
-        const {_attachments,...metadata}=record;
+        const {_attachments,inline,...metadata}=record;
         if(threshold===-1)return {_id:record._id,schema:1,path:fixture.path,content:new TextDecoder().decode(fixture.bytes),mtime:0,deleted:false};
         return threshold>0&&fixture.bytes.byteLength<=threshold
           ? {...metadata,inline:Buffer.from(body!).toString('base64')}
@@ -51,7 +52,7 @@ for(const threshold of (process.argv.length>2?process.argv.slice(2).map(Number):
           const body=doc.inline?new Uint8Array(Buffer.from(doc.inline,'base64')).buffer
             :await request(new URL(encodeURIComponent(doc._id)+'/content?rev='+encodeURIComponent(doc._rev),root));
           const begin=performance.now();
-          const opened=await decryptRecord(crypto,{...expected.record,_rev:doc._rev},body,syncPath);
+          const opened=await decryptRecord(crypto,{...expected.record,_rev:doc._rev,...(expected.record.inline!==undefined?{inline:base64url(new Uint8Array(body))}:{})},expected.record.inline!==undefined?undefined:body,syncPath);
           cryptoMs+=performance.now()-begin;
           if(!Buffer.from(opened.bytes!).equals(Buffer.from(expected.fixture.bytes)))throw new Error('Mismatch');
         }

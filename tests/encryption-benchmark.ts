@@ -19,7 +19,7 @@ for (const fixture of smallNotes(count)) {
   let tick = performance.now();
   const encrypted = await encryptRecord(sender, {...fixture, deleted: false, mtime: 0});
   encryptMs += performance.now() - tick;
-  encryptedBytes += encoder.encode(JSON.stringify(encrypted.record)).length + encrypted.body!.byteLength;
+  encryptedBytes += encoder.encode(JSON.stringify(encrypted.record)).length + (encrypted.body?.byteLength??0);
   tick = performance.now();
   const restored = await decryptRecord(receiver, encrypted.record, encrypted.body, syncPath);
   decryptMs += performance.now() - tick;
