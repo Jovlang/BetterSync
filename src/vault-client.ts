@@ -37,6 +37,11 @@ export class ObsidianVault implements VaultClient {
     };
     await walk('');return result;
   }
+  async modificationTime(path:string):Promise<number|undefined> {
+    if(!this.allowed(path)) throw new Error('Unsupported path.');
+    const stat=await this.app.vault.adapter.stat(path);
+    return stat?.type==='file' ? Math.trunc(stat.mtime) : undefined;
+  }
   async read(path:string):Promise<Content|null> {
     if(!this.allowed(path)) throw new Error('Unsupported path.');
     const diskPath=path.endsWith('/')?path.slice(0,-1):path;
@@ -94,17 +99,23 @@ export class ObsidianVault implements VaultClient {
     }
     await adapter.remove(backup);
   }
-  async create(path:string,content:Content):Promise<void> {
+  async create(path:string,content:Content,mtime?:number):Promise<void> {
     if(!this.allowed(path)) throw new Error('Unsupported path.');
     validateContent(path,content);
     const target=path.endsWith('/')?path.slice(0,-1):path;
     if(await this.app.vault.adapter.exists(target))throw new Error('Path exists.');
     await this.parents(target);
     if(path.endsWith('/')) {await this.app.vault.adapter.mkdir(target);return;}
+    if(mtime!==undefined) {await this.createTimestampedFile(path,content,mtime);return;}
     if(markdown(path) && !path.split('/').some(p=>p.startsWith('.')))await this.app.vault.create(path,content as string);
     else await this.createUnindexed(path,content);
   }
-  async compareAndSet(path:string,expected:string|null,content:Content|null):Promise<boolean> {
+  private async createTimestampedFile(path:string,content:Content,mtime:number):Promise<void> {
+    // Vault creation supports write options and rejects existing destinations.
+    if(markdown(path))await this.app.vault.create(path,content as string,{mtime});
+    else await this.app.vault.createBinary(path,typeof content==='string'?decodeBinary(content):content,{mtime});
+  }
+  async compareAndSet(path:string,expected:string|null,content:Content|null,mtime?:number):Promise<boolean> {
     if(!this.allowed(path)) throw new Error('Unsupported path.');
     if(content!==null)validateContent(path,content);
     if(path.endsWith('/') || !markdown(path) || !this.app.vault.getAbstractFileByPath(path)) {
@@ -119,7 +130,7 @@ export class ObsidianVault implements VaultClient {
         if(!await this.app.vault.adapter.exists(target))return true;
         if(path.endsWith('/')) {const children=await this.app.vault.adapter.list(target);if(children.files.length||children.folders.length)throw new Error('Directory is not empty.');await this.app.vault.adapter.rmdir(target,false);}
         else await this.app.vault.adapter.trashLocal(target);
-      } else if(expected===null)await this.create(path,content);
+      } else if(expected===null)await this.create(path,content,mtime);
       else if(!path.endsWith('/')) {
         const adapter=this.app.vault.adapter;
         if(markdown(path)) {
@@ -127,7 +138,7 @@ export class ObsidianVault implements VaultClient {
           await adapter.process(path,current=>{
             if(hash(current)!==expected)return current;
             matched=true;return content as string;
-          });
+          },mtime===undefined?undefined:{mtime});
           return matched;
         }
         const backup=this.recoveryPath(path);
@@ -137,7 +148,10 @@ export class ObsidianVault implements VaultClient {
         // The rename captures the actual bytes, including edits since the check.
         // Leave them journaled for recovery on mismatch, failure or a crash.
         if(hash(await adapter.readBinary(backup))!==expected)return false;
-        try {await this.createUnindexed(path,content);}
+        try {
+          if(mtime===undefined)await this.createUnindexed(path,content);
+          else await this.createTimestampedFile(path,content,mtime);
+        }
         catch(error) {if(await adapter.exists(path))return false;throw error;}
         await adapter.remove(backup);
       }
@@ -147,7 +161,7 @@ export class ObsidianVault implements VaultClient {
     if(!file) {
       if(expected!==null) return false;
       if(content===null) return true;
-      try {await this.create(path,content);return true;}
+      try {await this.create(path,content,mtime);return true;}
       catch(error) {if(this.app.vault.getAbstractFileByPath(path)) return false;throw error;}
     }
     if(!(file instanceof TFile)) throw new Error('A folder occupies this note path.');
@@ -162,7 +176,7 @@ export class ObsidianVault implements VaultClient {
     await this.app.vault.process(file,current=>{
       if(hash(current)!==expected || this.hasPendingEditorChanges(path,current)) return current;
       matched=true;return content as string;
-    });
+    },mtime===undefined?undefined:{mtime});
     return matched;
   }
 }

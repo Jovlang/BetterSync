@@ -1,6 +1,6 @@
 /** Synthetic disk-backed host for the real ObsidianVault and encrypted engine. */
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, readdir, readFile, writeFile, stat, copyFile, rm, rename} from 'node:fs/promises';
+import {mkdtemp, mkdir, readdir, readFile, writeFile, stat, copyFile, rm, rename, utimes} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, dirname} from 'node:path';
@@ -22,7 +22,7 @@ export async function diskHost() {
   const Host=(await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0]!.text).toString('base64'))).ObsidianVault as new(app:App)=>ObsidianVault;
   const root=await mkdtemp(join(tmpdir(),'bettersync-synthetic-'));
   const operations:{kind:string;path:string}[]=[];
-  let failCopy=false;
+  let failBinaryCreate=false;
   const adapter={
     stat:async(p:string)=>{try{const s=await stat(join(root,p));return {type:s.isDirectory()?'folder':'file',size:s.size,mtime:s.mtimeMs};}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return null;throw e;}},
     exists:async(p:string)=>!!await adapter.stat(p),
@@ -34,14 +34,21 @@ export async function diskHost() {
     readBinary:async(p:string)=>new Uint8Array(await readFile(join(root,p))).buffer,
     write:async(p:string,data:string)=>{operations.push({kind:'write',path:p});await writeFile(join(root,p),data);},
     writeBinary:async(p:string,data:ArrayBuffer)=>{operations.push({kind:'writeBinary',path:p});await writeFile(join(root,p),new Uint8Array(data));},
-    copy:async(from:string,to:string)=>{operations.push({kind:'copy',path:to});if(failCopy)throw Object.assign(new Error('private synthetic payload must not be logged'),{code:'EBUSY'});await copyFile(join(root,from),join(root,to),constants.COPYFILE_EXCL);},
+    copy:async(from:string,to:string)=>{operations.push({kind:'copy',path:to});if(failBinaryCreate)throw Object.assign(new Error('private synthetic payload must not be logged'),{code:'EBUSY'});await copyFile(join(root,from),join(root,to),constants.COPYFILE_EXCL);},
     remove:async(p:string)=>rm(join(root,p)),
     rename:async(from:string,to:string)=>rename(join(root,from),join(root,to)),
     process:async(p:string,update:(current:string)=>string)=>{const next=update(await adapter.read(p));await adapter.write(p,next);return next;}
   };
+  const createFile=async(p:string,data:string|Uint8Array,options?:{mtime?:number})=>{
+    operations.push({kind:'create',path:p});
+    if(failBinaryCreate && typeof data!=='string')throw Object.assign(new Error('private synthetic payload must not be logged'),{code:'EBUSY'});
+    const target=join(root,p);
+    await writeFile(target,data,{flag:'wx'});
+    if(options?.mtime!==undefined)await utimes(target,new Date(),new Date(options.mtime));
+  };
   const vault=new Host({vault:{adapter,configDir:'.obsidian',getAbstractFileByPath:()=>null,
-    create:async(p:string,text:string)=>{await writeFile(join(root,p),text,{flag:'wx'});}},workspace:{getLeavesOfType:()=>[]}} as unknown as App);
-  return {root,vault,operations,setFailCopy:(value:boolean)=>{failCopy=value;},
+    create:createFile,createBinary:(p:string,data:ArrayBuffer,options?:{mtime?:number})=>createFile(p,new Uint8Array(data),options)},workspace:{getLeavesOfType:()=>[]}} as unknown as App);
+  return {root,vault,operations,setFailBinaryCreate:(value:boolean)=>{failBinaryCreate=value;},
     seed:async(p:string,bytes:Uint8Array)=>{await mkdir(dirname(join(root,p)),{recursive:true});await writeFile(join(root,p),bytes);},
     cleanup:()=>rm(root,{recursive:true,force:true})};
 }
@@ -58,8 +65,12 @@ export async function freshEncryptedTree(remote:()=>Promise<EncryptedRemote>, in
     ['hero.jpg',bytes]
   ]);
   let engine:SyncEngine|undefined;
+  const mtime=new Date('2020-05-06T12:34:56.000Z');
   try {
-    for(const [path,data] of fixtures)await source.seed(path,data);
+    for(const [path,data] of fixtures) {
+      await source.seed(path,data);
+      await utimes(join(source.root,path),mtime,mtime);
+    }
     await mkdir(join(source.root,'empty'));
     await source.seed('.obsidian/excluded',new Uint8Array([1]));
     const expected=[...fixtures.keys(),'BetterDraw/','BetterDraw/nested/','empty/'].sort();
@@ -84,10 +95,11 @@ export async function freshEncryptedTree(remote:()=>Promise<EncryptedRemote>, in
       if(doc.path.endsWith('/'))assert.equal(record.inline,undefined);
       else assert.equal(record.inline!==undefined,fixtures.get(doc.path)!.byteLength<=65536);
       assert.equal(!!record._attachments,doc.path==='hero.jpg');
+      if(fixtures.has(doc.path))assert.equal(doc.mtime,mtime.getTime(),doc.path);
     }
     const downloadRemote=await remote();
     let b=make(destination.vault,downloadRemote,freshState(downloadRemote.stateBinding));engine=b.engine;
-    destination.setFailCopy(!!interrupt);await engine.start();
+    destination.setFailBinaryCreate(!!interrupt);await engine.start();
     if(interrupt){
       assert.equal(b.status(),'Sync error');
       assert.ok(b.logs.includes('incoming local-write failed (operation EBUSY)'));
@@ -95,7 +107,7 @@ export async function freshEncryptedTree(remote:()=>Promise<EncryptedRemote>, in
       for(const path of fixtures.keys())assert.ok(!b.logs.join('\n').includes(path));
       for(const p of fixtures.keys())if(p!=='note.md')assert.ok(b.disk().incoming[p]?.doc.encrypted);
       const saved=JSON.parse(JSON.stringify(b.disk())) as LocalSyncState;
-      destination.setFailCopy(false);
+      destination.setFailBinaryCreate(false);
       if(interrupt==='restart') {
         await engine.stop();
         b=make(destination.vault,downloadRemote,saved);engine=b.engine;await engine.start();
@@ -105,7 +117,7 @@ export async function freshEncryptedTree(remote:()=>Promise<EncryptedRemote>, in
     assert.equal(b.status(),'Synced');assert.equal(Object.keys(b.disk().incoming).length,0);
     assert.deepEqual((await destination.vault.listFiles()).sort(),expected);
     for(const [path,data] of fixtures)assert.deepEqual(new Uint8Array(await readFile(join(destination.root,path))),data,path);
-    for(const p of fixtures.keys())if(p!=='note.md')assert.ok(destination.operations.some(o=>o.kind==='copy'&&o.path===p));
+    for(const path of fixtures.keys())assert.equal(await destination.vault.modificationTime(path),mtime.getTime(),path);
     if(!interrupt)for(const p of expected)assert.ok(b.journals.has(p),p+' must be durably journaled');
   } finally {await engine?.stop();await source.cleanup();await destination.cleanup();}
 }

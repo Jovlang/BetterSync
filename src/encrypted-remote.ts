@@ -44,11 +44,11 @@ export class EncryptedRemote implements Remote {
     if (!opened.bytes) throw new SyncFailure('data', 'Missing encrypted file bytes.');
     return doc.path.endsWith('.md') ? new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(opened.bytes) : opened.bytes;
   }
-  async writeContent(path: string, content: Content | null, rev?: string): Promise<FileDocument> {
+  async writeContent(path: string, content: Content | null, rev?: string, mtime = Date.now()): Promise<FileDocument> {
     if (content !== null) validateContent(path, content);
     const bytes = content === null || path.endsWith('/') ? undefined : content instanceof ArrayBuffer ? content
       : path.endsWith('.md') ? new TextEncoder().encode(content).buffer : decodeBinary(content);
-    return this.logical(await this.wire.put({path, bytes, deleted: content === null, mtime: Date.now()}, rev));
+    return this.logical(await this.wire.put({path, bytes, deleted: content === null, mtime}, rev));
   }
   async getChanges(since: Sequence): Promise<RemoteChanges> {
     const page = await this.wire.changes(since);

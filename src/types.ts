@@ -18,7 +18,7 @@ export interface Remote {
   identity?(path: string): Promise<string>;
   validateIncoming?(value: unknown): Promise<FileDocument>;
   readContent?(doc: FileDocument): Promise<Content | null>;
-  writeContent?(path: string, content: Content | null, rev?: string): Promise<FileDocument>;
+  writeContent?(path: string, content: Content | null, rev?: string, mtime?: number): Promise<FileDocument>;
   getAttachment(doc: FileDocument): Promise<ArrayBuffer>;
   testConnection(): Promise<void>;
   getDocument(path: string): Promise<FileDocument | null>;
@@ -31,9 +31,10 @@ export interface VaultClient {
   recoverIncoming?(path:string, expectedHash:string|null, preserve:(content:Content)=>Promise<void>):Promise<void>;
   listFiles(): string[] | Promise<string[]>;
   scanChanges?(): Promise<string[]>;
+  modificationTime?(path: string): Promise<number | undefined>;
   read(path: string): Promise<Content | null>;
   /** A mismatch must retain changed contents, at the path or in recoverIncoming's journaled recovery file. */
-  compareAndSet(path: string, expectedHash: string | null, content: Content | null): Promise<boolean>;
+  compareAndSet(path: string, expectedHash: string | null, content: Content | null, mtime?: number): Promise<boolean>;
   create(path: string, content: Content): Promise<void>;
 }
 export type SyncStatus = 'Synced' | 'Syncing…' | 'Offline' | 'Conflict' | 'Sync error';

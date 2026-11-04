@@ -42,6 +42,12 @@ class Filesystem {
     if(this.entries.get(parent)!==null)throw new Error('Missing parent');
   }
   check(){if(this.crashed)throw new Error('Filesystem unavailable until restart');}
+  async createFile(path:string,value:ArrayBuffer):Promise<void> {
+    this.beforeCopy?.('',path);
+    this.parent(path);if(this.entries.has(path))throw new Error('Exists');
+    this.entries.set(path,value.slice(0));this.revision++;
+    this.afterCopy?.('',path);
+  }
   adapter={
     stat:async(path:string)=>{this.check();return this.entries.has(path)?{type:this.entries.get(path)===null?'folder':'file',size:this.entries.get(path)?.byteLength??0,mtime:this.revision}:null;},
     exists:async(path:string)=>{this.check();return this.entries.has(path);},
@@ -91,7 +97,9 @@ class Client {
   status:SyncStatus='Synced';
   constructor(readonly remote:MemoryRemote){this.reboot();}
   reboot(){
-    this.vault=new ObsidianVault({vault:{adapter:this.fs.adapter,getAbstractFileByPath:()=>null}} as unknown as App);
+    this.vault=new ObsidianVault({vault:{adapter:this.fs.adapter,getAbstractFileByPath:()=>null,
+      create:(path:string,text:string)=>this.fs.createFile(path,new TextEncoder().encode(text).buffer),
+      createBinary:(path:string,bytes:ArrayBuffer)=>this.fs.createFile(path,bytes)}} as unknown as App);
     this.store=new StateStore(JSON.parse(JSON.stringify(this.disk)),async state=>{this.disk=JSON.parse(JSON.stringify(state));});
     this.engine=new SyncEngine(this.vault,this.remote,this.store,{status:s=>this.status=s,notice:()=>{},log:()=>{},confirm:async d=>d});
   }

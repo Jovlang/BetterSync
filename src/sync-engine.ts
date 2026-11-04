@@ -184,7 +184,7 @@ export class SyncEngine {
         }
         this.expectedRemoteWrites.set(path,desiredHash);
         stage='local-write';
-        if(await this.vault.compareAndSet(path,current,desired)) {
+        if(await this.vault.compareAndSet(path,current,desired,doc.mtime)) {
           stage='baseline-save';
           await this.accept(doc,desiredHash);this.ui.log('remote write applied');return;
         }
@@ -206,20 +206,26 @@ export class SyncEngine {
   }
   private async push(path:string):Promise<void> {
     const base=this.store.state.files[path];
+    const sourceMtime=path.endsWith('/') ? undefined : await this.vault.modificationTime?.(path);
     const content=await this.vault.read(path), digest=hash(content);
     if(digest===(base?.hash ?? null)) return;
+    if(!path.endsWith('/') && sourceMtime!==await this.vault.modificationTime?.(path)) {
+      this.dirty.add(path);
+      return;
+    }
     if(content!==null) validateContent(path,content);
     const remote=await this.remote.getDocument(path);
     if(remote && remote._rev!==base?.rev) {await this.receive(remote);return;}
     if(!remote && base) throw new SyncFailure('data','A synced note is missing from the server.');
+    const mtime=content===null ? Date.now() : sourceMtime ?? Date.now();
     try {
       let saved:FileDocument;
-      if(this.remote.writeContent) saved=await this.remote.writeContent(path,content,base?.rev);
+      if(this.remote.writeContent) saved=await this.remote.writeContent(path,content,base?.rev,mtime);
       else {
         const binary=content!==null && !path.endsWith('/') && !path.endsWith('.md');
         const bytes=binary ? (typeof content==='string'?decodeBinary(content):content!) : undefined;
-        const doc:FileDocument=bytes ? {_id:documentId(path),schema:3,path,deleted:false,mtime:Date.now(),size:bytes.byteLength,hash:rawHash(bytes),_attachments:{content:{stub:true,content_type:'application/octet-stream',length:bytes.byteLength}}}
-          : {_id:documentId(path),schema:path.endsWith('.md')?1:2,path,content:(content??'') as string,deleted:content===null,mtime:Date.now()};
+        const doc:FileDocument=bytes ? {_id:documentId(path),schema:3,path,deleted:false,mtime,size:bytes.byteLength,hash:rawHash(bytes),_attachments:{content:{stub:true,content_type:'application/octet-stream',length:bytes.byteLength}}}
+          : {_id:documentId(path),schema:path.endsWith('.md')?1:2,path,content:(content??'') as string,deleted:content===null,mtime};
         if(base) doc._rev=base.rev;
 
         saved=content===null?await this.remote.deleteDocument(doc):await this.remote.putDocument(doc,bytes);
