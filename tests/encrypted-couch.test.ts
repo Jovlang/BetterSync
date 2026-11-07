@@ -1,8 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {EncryptedCouch} from '../src/encrypted-couch';
-import {createConfiguration, generateRecoveryCode, importRecoveryCode, CONFIGURATION_ID, type VaultConfiguration} from '../src/encryption-setup';
-import {type EncryptedRecord, encryptRecord} from '../src/encrypted-protocol';
+import {EncryptedCouch} from '../src/legacy/encrypted-couch';
+import {createConfiguration, generateRecoveryCode, importRecoveryCode, CONFIGURATION_ID, type VaultConfiguration} from '../src/legacy/encryption-setup';
+import {type EncryptedRecord, encryptRecord} from '../src/legacy/encrypted-protocol';
 import type {Http} from '../src/couch-client';
 import {SyncFailure} from '../src/types';
 import {syncPath} from '../src/paths';

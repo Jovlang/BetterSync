@@ -1,5 +1,7 @@
 # Schema 4 transport evaluation
 
+**Historical evaluation.** The 0.5.0 schema-5 prerelease supersedes the large-attachment transport below. See [current protocol](PROTOCOL.md) and [new measurements/device gates](CHUNKED-TRANSFER-VERIFICATION.md). These old measurements remain useful context, not current runtime behavior.
+
 Status: evaluation in progress; schema 4 is NOT frozen. Unrelated E2EE work is paused.
 
 The architecture criterion is avoiding per-file RTT scaling for ordinary small files while preserving one engine, authenticated content, durable journals and bounded memory. Earlier fixed millisecond UX targets in E2EE-PLAN.md are superseded by this criterion.

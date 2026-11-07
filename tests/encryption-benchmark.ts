@@ -1,6 +1,6 @@
 /** Codec microbenchmark only: no HTTP, CouchDB, Obsidian or iPhone measurements. */
-import {VaultCrypto, randomBytes, base64url} from '../src/crypto';
-import {encryptRecord, decryptRecord} from '../src/encrypted-protocol';
+import {VaultCrypto, randomBytes, base64url} from '../src/legacy/crypto';
+import {encryptRecord, decryptRecord} from '../src/legacy/encrypted-protocol';
 import {rawHash, syncPath, documentId} from '../src/paths';
 import {smallNotes} from './benchmark-fixtures';
 

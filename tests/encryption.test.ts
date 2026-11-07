@@ -1,8 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {hkdfSync, createHmac, createDecipheriv} from 'node:crypto';
-import {VaultCrypto, base64urlLength, base64url, unbase64url, frame, EncryptionError, CRYPTO_DOMAIN} from '../src/crypto';
-import {encryptRecord, decryptRecord, decryptMetadata, validateEncryptedRecord, MAX_METADATA_BYTES, type RecordInput} from '../src/encrypted-protocol';
+import {VaultCrypto, base64urlLength, base64url, unbase64url, frame, EncryptionError, CRYPTO_DOMAIN} from '../src/legacy/crypto';
+import {encryptRecord, decryptRecord, decryptMetadata, validateEncryptedRecord, MAX_METADATA_BYTES, type RecordInput} from '../src/legacy/encrypted-protocol';
 import {syncPath} from '../src/paths';
 
 // Public synthetic test material only; never use these keys for a real vault.

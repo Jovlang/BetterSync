@@ -1,8 +1,8 @@
-import {base64url,unbase64url} from '../src/crypto';
+import {base64url,unbase64url} from '../src/legacy/crypto';
 /** Isolated representation experiment. No production protocol/settings changes. */
 import {randomUUID} from 'node:crypto';
-import {generateRecoveryCode,importRecoveryCode} from '../src/encryption-setup';
-import {encryptRecord,decryptRecord} from '../src/encrypted-protocol';
+import {generateRecoveryCode,importRecoveryCode} from '../src/legacy/encryption-setup';
+import {encryptRecord,decryptRecord} from '../src/legacy/encrypted-protocol';
 import {smallNotes} from './benchmark-fixtures';
 import {syncPath} from '../src/paths';
 const base=new URL(process.env.BETTERSYNC_TEST_SERVER??'http://invalid');

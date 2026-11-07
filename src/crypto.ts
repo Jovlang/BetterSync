@@ -5,7 +5,7 @@ export class EncryptionError extends Error {
   constructor() { super('Could not authenticate encrypted sync data.'); }
 }
 const encoder = new TextEncoder();
-export const CRYPTO_DOMAIN = 'bettersync-e2ee-draft-1';
+export const CRYPTO_DOMAIN = 'bettersync-e2ee-5';
 export function frame(...parts: string[]): Uint8Array<ArrayBuffer> {
   const encoded = parts.map(p => encoder.encode(p));
   const bytes = new Uint8Array(encoded.reduce((n, p) => n + 4 + p.length, 0));
@@ -48,7 +48,7 @@ export function randomBytes(length: number): Uint8Array<ArrayBuffer> {
   try { return globalThis.crypto.getRandomValues(new Uint8Array(length)); }
   catch { throw new Error('Secure randomness is unavailable. Sync cannot start.'); }
 }
-type Purpose = 'metadata' | 'content' | 'configuration';
+type Purpose = 'metadata' | 'content' | 'configuration' | 'chunk';
 export interface Sealed { nonce: string; bytes: ArrayBuffer }
 
 export class VaultCrypto {
@@ -71,35 +71,35 @@ export class VaultCrypto {
   async documentId(path: string): Promise<string> {
     if (!syncPath(path) || new TextDecoder('utf-8', {fatal: true}).decode(encoder.encode(path)) !== path)
       throw new EncryptionError();
-    return 'e4:' + base64url(new Uint8Array(await crypto.subtle.sign('HMAC', this.ids, frame(CRYPTO_DOMAIN, 'path', path))));
+    return 'f5:' + base64url(new Uint8Array(await crypto.subtle.sign('HMAC', this.ids, frame(CRYPTO_DOMAIN, 'path', path))));
   }
 
   async stateBinding(databaseIdentity: string): Promise<string> {
-    return 'e4:' + base64url(new Uint8Array(await crypto.subtle.sign('HMAC', this.ids,
+    return 'f5:' + base64url(new Uint8Array(await crypto.subtle.sign('HMAC', this.ids,
       frame(CRYPTO_DOMAIN, 'local-state-binding', this.vaultId, databaseIdentity))));
   }
 
-  private async parameters(id: string, salt: string, purpose: Purpose) {
-    if (!/^e4:[A-Za-z0-9_-]{43}$/.test(id) && !(id === 'bettersync:configuration' && purpose === 'configuration'))
+  private async parameters(id: string, salt: string, purpose: Purpose, context:string[] = []) {
+    if (!/^f5:[A-Za-z0-9_-]{43}$/.test(id) && !(id === 'bettersync:configuration' && purpose === 'configuration'))
       throw new EncryptionError();
     const key = await crypto.subtle.deriveKey({name: 'HKDF', hash: 'SHA-256', salt: unbase64url(salt, 32),
-      info: frame(CRYPTO_DOMAIN, this.vaultId, id, purpose)}, this.root,
+      info: frame(CRYPTO_DOMAIN, this.vaultId, id, purpose,...context)}, this.root,
     {name: 'AES-GCM', length: 256}, false, ['encrypt', 'decrypt']);
-    return {key, additionalData: frame(CRYPTO_DOMAIN, '4', this.vaultId, id, salt, purpose)};
+    return {key, additionalData: frame(CRYPTO_DOMAIN, '5', this.vaultId, id, salt, purpose,...context)};
   }
 
-  async seal(id: string, salt: string, purpose: Purpose, plaintext: ArrayBuffer): Promise<Sealed> {
-    const {key, additionalData} = await this.parameters(id, salt, purpose);
+  async seal(id: string, salt: string, purpose: Purpose, plaintext: ArrayBuffer | Uint8Array<ArrayBuffer>, context:string[] = []): Promise<Sealed> {
+    const {key, additionalData} = await this.parameters(id, salt, purpose,context);
     const iv = randomBytes(12);
     const bytes = await crypto.subtle.encrypt({name: 'AES-GCM', iv, additionalData, tagLength: 128}, key, plaintext);
     return {nonce: base64url(iv), bytes};
   }
 
-  async open(id: string, salt: string, purpose: Purpose, nonce: string, ciphertext: ArrayBuffer): Promise<ArrayBuffer> {
+  async open(id: string, salt: string, purpose: Purpose, nonce: string, ciphertext: ArrayBuffer, context:string[] = []): Promise<ArrayBuffer> {
     try {
       if (ciphertext.byteLength < 16) throw new EncryptionError();
       const iv = unbase64url(nonce, 12);
-      const {key, additionalData} = await this.parameters(id, salt, purpose);
+      const {key, additionalData} = await this.parameters(id, salt, purpose,context);
       return await crypto.subtle.decrypt({name: 'AES-GCM', iv, additionalData, tagLength: 128}, key, ciphertext);
     } catch { throw new EncryptionError(); }
   }

@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {EncryptedRemote} from '../src/encrypted-remote';
-import {importRecoveryCode, generateRecoveryCode} from '../src/encryption-setup';
+import {EncryptedRemote} from '../src/legacy/encrypted-remote';
+import {importRecoveryCode, generateRecoveryCode} from '../src/legacy/encryption-setup';
 import {freshState, StateStore} from '../src/local-state';
 import {SyncEngine} from '../src/sync-engine';
 import {Device, settle} from './helpers';

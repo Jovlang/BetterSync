@@ -1,133 +1,94 @@
-/** Draft hybrid transport used by the encrypted remote adapter. */
-import type {Connection, Http} from './couch-client';
+import type {Connection,Http} from './couch-client';
 import {CouchHttp} from './couch-http';
 import {CouchConfiguration} from './couch-configuration';
-import {authenticateConfiguration, CONFIGURATION_ID} from './encryption-setup';
-import {VaultCrypto, base64url, randomBytes, unbase64url, CRYPTO_DOMAIN} from './crypto';
-import {encryptRecord, decryptRecord, decryptMetadata, validateEncryptedRecord,
-  type EncryptedRecord, type RecordInput, type TransferObserver} from './encrypted-protocol';
-import {SyncFailure, type Sequence} from './types';
-
-export type EncryptedChange = {id: string; record: EncryptedRecord} | {id: string; revision?: string; rejected: 'invalid-record'};
-export interface EncryptedPage {results: EncryptedChange[]; lastSequence: Sequence; sourceRows: number}
-function invalid(): never { throw new SyncFailure('data', 'The server returned unreadable encrypted sync data.'); }
-function revision(value: unknown): value is string {
-  return typeof value === 'string' && value.length <= 256 && /^[1-9][0-9]*-[A-Za-z0-9]+$/.test(value);
-}
-function sequence(value: unknown): value is Sequence {
-  return (typeof value === 'string' && value.length > 0 && value.length <= 8192)
-    || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0);
-}
-function opaqueId(id: unknown): id is string {
-  if (typeof id !== 'string' || !id.startsWith('e4:')) return false;
-  try { unbase64url(id.slice(3), 32); return true; } catch { return false; }
-}
-
+import {authenticateConfiguration,CONFIGURATION_ID} from './encryption-setup';
+import {VaultCrypto,CRYPTO_DOMAIN} from './crypto';
+import {EncryptedChunk,openChunk,validateEncryptedRecord,decryptMetadata,revision,fileId,chunkId,object,invalid,
+  type ChunkContext,type EncryptedRecord} from './encrypted-protocol';
+import {SyncFailure,type Sequence} from './types';
+import {PendingTransferFailure} from './types';
+import {PendingRequestFailure} from './http';
 export class EncryptedCouch {
-  observe?:TransferObserver;
-  private constructor(private transport: CouchHttp, private crypto: VaultCrypto, private allowedPath: (path: string) => boolean) {}
-  static async connect(connection: Connection, http: Http, crypto: VaultCrypto, allowedPath: (path: string) => boolean): Promise<EncryptedCouch> {
-    // A wrong/missing key or missing configuration cannot obtain a writable client.
-    await authenticateConfiguration(crypto, await new CouchConfiguration(connection, http).getConfiguration());
-    return new EncryptedCouch(new CouchHttp(connection, http), crypto, allowedPath);
+  private transport:CouchHttp;
+  private constructor(connection:Connection,private http:Http,readonly crypto:VaultCrypto,readonly allowed:(path:string)=>boolean) {this.transport=new CouchHttp(connection,http);}
+  static async connect(connection:Connection,http:Http,crypto:VaultCrypto,allowed:(path:string)=>boolean) {
+    await authenticateConfiguration(crypto,await new CouchConfiguration(connection,http).getConfiguration());
+    return new EncryptedCouch(connection,http,crypto,allowed);
   }
-  private async inspect(value: unknown): Promise<EncryptedRecord> {
-    const record = validateEncryptedRecord(value);
-    if (!record._rev) invalid();
-    await decryptMetadata(this.crypto, record, this.allowedPath);
-    return record;
+  assertChunkAvailable() {
+    try {(this.http as Http&{assertChunkAvailable?:()=>void}).assertChunkAvailable?.();}
+    catch(error) {if(error instanceof PendingRequestFailure)throw new PendingTransferFailure();throw error;}
   }
-  async metadata(value: unknown) {
-    const record = validateEncryptedRecord(value);
-    if (!record._rev) invalid();
-    return {record, metadata: await decryptMetadata(this.crypto, record, this.allowedPath)};
+  usage() {return (this.http as Http&{usage?:()=>{chunks:number;controls:number;bytesHeld:number}}).usage?.();}
+  async raw(id:string):Promise<unknown|null> {
+    const response=object(await this.transport.request('/_all_docs?include_docs=true&attachments=false','POST',{keys:[id]}));
+    if(!Array.isArray(response.rows)||response.rows.length!==1)invalid();const r=object(response.rows[0]);
+    if(r.key!==id)invalid();
+    if(r.error==='not_found'&&r.doc===undefined&&r.value===undefined)return null;
+    const v=object(r.value),d=object(r.doc);
+    if(r.id!==id||r.error!==undefined||v.deleted!==undefined||d._id!==id||!revision(d._rev)||v.rev!==d._rev)invalid();
+    return d;
   }
-  async get(path: string): Promise<EncryptedRecord | null> {
-    if (!this.allowedPath(path)) invalid();
-    const id = await this.crypto.documentId(path);
-    const response = await this.transport.request('/_all_docs?include_docs=true&attachments=false', 'POST', {keys: [id]}) as
-      {rows?: {key?: unknown; id?: unknown; error?: unknown; doc?: unknown; value?: {rev?: unknown; deleted?: unknown}}[]} | null;
-    if (!response || !Array.isArray(response.rows) || response.rows.length !== 1) invalid();
-    const row = response.rows[0];
-    if (!row || row.key !== id) invalid();
-    if (row.error === 'not_found' && row.doc === undefined && row.value === undefined && row.id === undefined) return null;
-    if (row.error !== undefined || row.id !== id || !row.value || row.value.deleted !== undefined) invalid();
-    const record = await this.inspect(row.doc);
-    if (record._id !== id || record._rev !== row.value.rev) invalid();
-    return record;
+  async metadata(value:unknown) {
+    const record=validateEncryptedRecord(value);if(!record._rev)invalid();
+    return {record,metadata:await decryptMetadata(this.crypto,record,this.allowed)};
   }
-  /** Caller must persist this envelope and its exact revision before filesystem effects. */
-  async download(value: unknown) {
-    const record = await this.inspect(value);
-    let body: ArrayBuffer | undefined;
-    if (record._attachments) {
-      await this.observe?.('attachment-download',record._attachments.content.length-16);
-      const response = await this.transport.request('/' + encodeURIComponent(record._id) + '/content?rev=' + encodeURIComponent(record._rev!),
-        'GET', undefined, 'application/octet-stream', 'binary');
-      if (!(response instanceof ArrayBuffer) || response.byteLength !== record._attachments.content.length) invalid();
-      body = response;
+  async get(path:string) {
+    if(!this.allowed(path))invalid();const raw=await this.raw(await this.crypto.documentId(path));
+    return raw===null?null:(await this.metadata(raw)).record;
+  }
+  async putManifest(value:EncryptedRecord,expected?:string):Promise<EncryptedRecord> {
+    const record=validateEncryptedRecord(value);await decryptMetadata(this.crypto,record,this.allowed);
+    if(record._rev!==undefined||(expected!==undefined&&!revision(expected)))invalid();
+    const r=object(await this.transport.request('/'+encodeURIComponent(record._id),'PUT',{...record,...(expected?{_rev:expected}:{})}));
+    if(r.ok!==true||r.id!==record._id||!revision(r.rev))invalid();return {...record,_rev:r.rev};
+  }
+  async putChunk(sealed:EncryptedChunk,c:ChunkContext,expected:Uint8Array<ArrayBuffer>):Promise<void> {
+    if(!EncryptedChunk.isIssued(sealed)||sealed.record._id!==c.metadata.chunks[c.index])invalid();
+    this.assertChunkAvailable();
+    try {
+      const r=object(await this.transport.request('/'+encodeURIComponent(sealed.record._id),'PUT',sealed.record));
+      if(r.ok!==true||r.id!==sealed.record._id||!revision(r.rev)||!r.rev.startsWith('1-'))invalid();
+    } catch(error) {
+      if(!(error instanceof SyncFailure)||error.kind!=='conflict')throw error;
+      const actual=new Uint8Array(await this.downloadChunk(c));
+      if(actual.length!==expected.length||actual.some((b,i)=>b!==expected[i]))invalid();
     }
-    await this.observe?.('content-decryption');
-    return decryptRecord(this.crypto, record, body, this.allowedPath);
   }
-  /** One encryption attempt and one revision-checked PUT. No automatic conflict retry.
-   * Input bytes are borrowed until completion and must remain unchanged.
-   */
-  async put(input: RecordInput, expectedRevision?: string): Promise<EncryptedRecord> {
-    if (!this.allowedPath(input.path) || (expectedRevision !== undefined && !revision(expectedRevision))) invalid();
-    const {record, body} = await encryptRecord(this.crypto, input, this.observe);
-    if (expectedRevision !== undefined) record._rev = expectedRevision;
-    let wire: unknown = record, contentType = 'application/json';
-    if (body) {
-      await this.observe?.('multipart-allocation');
-      const boundary = 'bettersync-' + base64url(randomBytes(24));
-      const metadata = {...record, _attachments: {content: {content_type: 'application/octet-stream', follows: true, length: body.byteLength}}};
-      const encoder = new TextEncoder();
-      const head = encoder.encode('--' + boundary + '\r\nContent-Type: application/json\r\n\r\n' + JSON.stringify(metadata)
-        + '\r\n--' + boundary + '\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename="content"\r\n\r\n');
-      const tail = encoder.encode('\r\n--' + boundary + '--\r\n');
-      const multipart = new Uint8Array(head.length + body.byteLength + tail.length);
-      multipart.set(head); multipart.set(new Uint8Array(body), head.length); multipart.set(tail, head.length + body.byteLength);
-      wire = multipart.buffer; contentType = 'multipart/related; boundary="' + boundary + '"';
+  async downloadChunk(c:ChunkContext):Promise<ArrayBuffer> {
+    this.assertChunkAvailable();const raw=await this.raw(c.metadata.chunks[c.index]!);
+    if(raw===null)throw new SyncFailure('data','A required encrypted part is missing. Pending work is retained.');
+    return openChunk(this.crypto,c,raw);
+  }
+  async changes(since:Sequence) {
+    if(!(typeof since==='number'&&Number.isSafeInteger(since)&&since>=0)&&!(typeof since==='string'&&since.length>0&&since.length<=8192))invalid();
+    const page=object(await this.transport.request('/_changes?include_docs=false&limit=200&since='+encodeURIComponent(String(since))));
+    if(!Array.isArray(page.results)||page.results.length>200||!(typeof page.last_seq==='number'&&Number.isSafeInteger(page.last_seq)&&page.last_seq>=0||typeof page.last_seq==='string'&&page.last_seq.length>0&&page.last_seq.length<=8192))invalid();
+    const wanted:{id:string;rev:string}[]=[],results:({id:string;record:EncryptedRecord}|{id:string;rejected:true})[]=[];
+    for(const value of page.results) {
+      const row=object(value);
+      if(!(typeof row.seq==='number'&&Number.isSafeInteger(row.seq)&&row.seq>=0||typeof row.seq==='string'&&row.seq.length>0&&row.seq.length<=8192))invalid();
+      if(row.id===CONFIGURATION_ID) {await authenticateConfiguration(this.crypto,await this.raw(CONFIGURATION_ID));continue;}
+      if(chunkId(row.id))continue;
+      if(!fileId(row.id))throw new SyncFailure('configuration','This database uses an unsupported sync format. Use a fresh schema-5 test database.');
+      if(row.deleted||!Array.isArray(row.changes)||row.changes.length!==1||!revision(row.changes[0]?.rev)) {results.push({id:row.id,rejected:true});continue;}
+      wanted.push({id:row.id,rev:row.changes[0].rev});
     }
-    await this.observe?.('attachment-upload');
-    const response = await this.transport.request('/' + encodeURIComponent(record._id), 'PUT', wire, contentType) as
-      {ok?: unknown; id?: unknown; rev?: unknown} | null;
-    if (!response || response.ok !== true || response.id !== record._id || !revision(response.rev)) invalid();
-    return {...record, _rev: response.rev};
-  }
-  /** Bounded rejection descriptors let the engine quarantine one corrupt record
-   * without retaining hostile payloads or losing later valid changes. No checkpoint is persisted here.
-   */
-  async changes(since: Sequence): Promise<EncryptedPage> {
-    if (!sequence(since)) invalid();
-    const response = await this.transport.request('/_changes?include_docs=true&attachments=false&limit=200&since=' + encodeURIComponent(String(since))) as
-      {results?: {id?: unknown; seq?: unknown; doc?: unknown; deleted?: unknown; changes?: {rev?: unknown}[]}[]; last_seq?: unknown} | null;
-    if (!response || !Array.isArray(response.results) || response.results.length > 200 || !sequence(response.last_seq)) invalid();
-    const results: EncryptedChange[] = [];
-    for (const row of response.results) {
-      if (!row || !sequence(row.seq)) invalid();
-      if (row.id === CONFIGURATION_ID) {
-        if (row.deleted) invalid();
-        await authenticateConfiguration(this.crypto, row.doc);
-        continue;
-      }
-      if (!opaqueId(row.id)) throw new SyncFailure('configuration', 'This database contains unsupported sync records.');
-      // A future/plaintext protocol is a database-level stop, not a per-file retry.
-      const schema = row.doc && typeof row.doc === 'object' ? (row.doc as {schema?: unknown}).schema : undefined;
-      if (schema !== undefined && schema !== 4) throw new SyncFailure('configuration', 'This database contains an unsupported sync protocol.');
-      const protocol = row.doc && typeof row.doc === 'object' ? (row.doc as {protocol?: unknown}).protocol : undefined;
-      if (protocol !== undefined && protocol !== CRYPTO_DOMAIN) throw new SyncFailure('configuration', 'This database contains an unsupported sync protocol.');
-      try {
-        if (row.deleted) invalid();
-        const record = await this.inspect(row.doc);
-        if (record._id !== row.id || !Array.isArray(row.changes) || row.changes.length !== 1 || row.changes[0]?.rev !== record._rev) invalid();
-        results.push({id: row.id, record});
-      } catch {
-        const rev = Array.isArray(row.changes) && row.changes.length === 1 ? row.changes[0]?.rev : undefined;
-        results.push({id: row.id, ...(revision(rev) ? {revision: rev} : {}), rejected: 'invalid-record'});
+    for(let i=0;i<wanted.length;i+=16) {
+      const batch=wanted.slice(i,i+16),response=object(await this.transport.request('/_bulk_get?revs=false&attachments=false','POST',{docs:batch}));
+      if(!Array.isArray(response.results)||response.results.length!==batch.length)invalid();
+      for(let j=0;j<batch.length;j++) {
+        const expected=batch[j]!;
+        try {
+          const result=object(response.results[j]);if(result.id!==expected.id||!Array.isArray(result.docs)||result.docs.length!==1)invalid();
+          const raw=object(result.docs[0]).ok;
+          if(raw&&typeof raw==='object'&&('schema' in raw&&raw.schema!==5||'protocol' in raw&&raw.protocol!==CRYPTO_DOMAIN))
+            throw new SyncFailure('configuration','This database contains an unsupported sync protocol.');
+          const {record}=await this.metadata(raw);
+          if(record._id!==expected.id||record._rev!==expected.rev)invalid();results.push({id:record._id,record});
+        } catch(error) {if(error instanceof SyncFailure&&error.kind==='configuration')throw error;results.push({id:expected.id,rejected:true});}
       }
     }
-    return {results, lastSequence: response.last_seq, sourceRows: response.results.length};
+    return {results,lastSequence:page.last_seq as Sequence,sourceRows:page.results.length};
   }
 }

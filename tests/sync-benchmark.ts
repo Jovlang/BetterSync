@@ -1,9 +1,9 @@
 /** Real CouchDB HTTP + simulated vaults. Never a real-device benchmark. */
 import {randomUUID} from 'node:crypto';
 import {CouchClient,type Http} from '../src/couch-client';
-import {CouchConfiguration} from '../src/couch-configuration';
-import {createConfiguration,generateRecoveryCode,importRecoveryCode} from '../src/encryption-setup';
-import {EncryptedRemote} from '../src/encrypted-remote';
+import {CouchConfiguration} from '../src/legacy/couch-configuration';
+import {createConfiguration,generateRecoveryCode,importRecoveryCode} from '../src/legacy/encryption-setup';
+import {EncryptedRemote} from '../src/legacy/encrypted-remote';
 import {Device} from './helpers';
 import {smallNotes} from './benchmark-fixtures';
 import {syncPath} from '../src/paths';

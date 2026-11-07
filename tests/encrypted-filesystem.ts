@@ -1,13 +1,13 @@
 /** Synthetic disk-backed host for the real ObsidianVault and encrypted engine. */
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, readdir, readFile, writeFile, stat, copyFile, rm, rename, utimes} from 'node:fs/promises';
+import {mkdtemp, mkdir, readdir, readFile, writeFile, appendFile, stat, copyFile, rm, rename, utimes} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, dirname} from 'node:path';
 import {build} from 'esbuild';
 import type {App} from 'obsidian';
 import type {ObsidianVault} from '../src/vault-client';
-import {EncryptedRemote} from '../src/encrypted-remote';
+import {EncryptedRemote} from '../src/legacy/encrypted-remote';
 import {freshState, StateStore} from '../src/local-state';
 import {SyncEngine} from '../src/sync-engine';
 import type {LocalSyncState, SyncStatus} from '../src/types';
@@ -34,8 +34,11 @@ export async function diskHost() {
     readBinary:async(p:string)=>new Uint8Array(await readFile(join(root,p))).buffer,
     write:async(p:string,data:string)=>{operations.push({kind:'write',path:p});await writeFile(join(root,p),data);},
     writeBinary:async(p:string,data:ArrayBuffer)=>{operations.push({kind:'writeBinary',path:p});await writeFile(join(root,p),new Uint8Array(data));},
+    appendBinary:async(p:string,data:ArrayBuffer,options?:{mtime?:number})=>{operations.push({kind:'appendBinary',path:p});await appendFile(join(root,p),new Uint8Array(data));if(options?.mtime!==undefined)await utimes(join(root,p),new Date(),new Date(options.mtime));},
     copy:async(from:string,to:string)=>{operations.push({kind:'copy',path:to});if(failBinaryCreate)throw Object.assign(new Error('private synthetic payload must not be logged'),{code:'EBUSY'});await copyFile(join(root,from),join(root,to),constants.COPYFILE_EXCL);},
     remove:async(p:string)=>rm(join(root,p)),
+    trashLocal:async(p:string)=>{const dir=join(root,'.trash','synthetic-trash');await mkdir(dir,{recursive:true});await rename(join(root,p),join(dir,Date.now()+'-'+Math.random().toString(16).slice(2)));},
+    rmdir:async(p:string)=>rm(join(root,p),{recursive:true}),
     rename:async(from:string,to:string)=>rename(join(root,from),join(root,to)),
     process:async(p:string,update:(current:string)=>string)=>{const next=update(await adapter.read(p));await adapter.write(p,next);return next;}
   };
@@ -48,7 +51,7 @@ export async function diskHost() {
   };
   const vault=new Host({vault:{adapter,configDir:'.obsidian',getAbstractFileByPath:()=>null,
     create:createFile,createBinary:(p:string,data:ArrayBuffer,options?:{mtime?:number})=>createFile(p,new Uint8Array(data),options)},workspace:{getLeavesOfType:()=>[]}} as unknown as App);
-  return {root,vault,operations,setFailBinaryCreate:(value:boolean)=>{failBinaryCreate=value;},
+  return {root,vault,adapter,operations,setFailBinaryCreate:(value:boolean)=>{failBinaryCreate=value;},
     seed:async(p:string,bytes:Uint8Array)=>{await mkdir(dirname(join(root,p)),{recursive:true});await writeFile(join(root,p),bytes);},
     cleanup:()=>rm(root,{recursive:true,force:true})};
 }

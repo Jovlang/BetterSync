@@ -2,7 +2,7 @@
 
 **All rows are NOT RUN. A passing automated suite is not an MVP acceptance sign-off.**
 
-Release is also **BLOCKED** by the observed iPhone freeze/restart loop after adding an approximately 88 MB MOV. Recovery safeguards and automated large-file coverage do not establish bounded-memory operation or iPhone acceptance. See [the large-attachment investigation](LARGE-ATTACHMENT-INVESTIGATION.md).
+Release is also **BLOCKED** by the observed iPhone freeze/restart loop after adding an approximately 88 MB MOV. The schema-5 implementation removes full ciphertext/multipart amplification and passes automated chunked-transfer tests, but this does not establish iPhone acceptance. Begin with the [schema-5 capability/reproduction checklist](CHUNKED-TRANSFER-VERIFICATION.md), using Obsidian 1.12.3+ and fresh test vaults/database. See [the original investigation](LARGE-ATTACHMENT-INVESTIGATION.md).
 
 Schema-4 initial-sync acceptance is **BLOCKED** by one observed intermittent initial-materialization stall on Mac, not yet reproduced; platform specificity is unproven. Twelve of 18 Markdown files arrived before six Markdown files, five SVGs and one JPG remained incoming for minutes. Manual Retry completed the remaining entries. The same dataset completed on iPhone. The original exception was not captured. Full-tree byte equality and sufficient automatic-recovery evidence remain required. See [the investigation and repeated-run criteria](INITIAL-SYNC-INVESTIGATION.md). The numbered cross-device scenarios below remain unaccepted.
 

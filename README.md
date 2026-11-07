@@ -2,13 +2,13 @@
 
 Small Obsidian plugin for synchronizing vault files and directories through one self-hosted CouchDB database. Designed for desktop, laptop and phone, with no master client and no device registry.
 
-**Status: 0.4.0 E2EE prerelease, not yet device-validated.** The automated suite exercises three independent sync engines, including offline edits, conflicts and restart recovery. The ten acceptance tests on real desktop, MacBook and iPhone clients remain the release gate. Real-device testing has recorded an intermittent initial-download stall. See [the acceptance checklist](docs/ACCEPTANCE.md) for the current status.
+**Status: 0.5.0 schema-5 prerelease; not device-validated.** This preview replaces whole-attachment encryption/HTTP buffering with authenticated chunks and staged downloads. Use a fresh test vault/database; it cannot join a schema-4 database. The ten acceptance tests on real desktop, MacBook and iPhone, plus the 88 MB iPhone reproduction, remain the release gate. See [implementation evidence and remaining device checks](docs/CHUNKED-TRANSFER-VERIFICATION.md).
 
 ## Install the test build
 
 1. Use a disposable test vault and a dedicated, empty CouchDB database.
 2. Copy `main.js` and `manifest.json` into `<vault>/.obsidian/plugins/bettersync/` on each device. Reload Obsidian and enable BetterSync under Community plugins. The Actions artifact contains these two files; create the `bettersync/` plugin folder yourself.
-3. Use Obsidian 1.11.4 or later. Enter the HTTPS server URL, database, username and password. Test the connection, select **Set up encryption**, save the recovery code outside the vault, then enable Sync. On other devices, enter the same recovery code.
+3. Use Obsidian 1.12.3 or later (public binary append support is required). Enter the HTTPS server URL, database, username and password. Test the connection, select **Set up encryption**, save the recovery code outside the vault, then enable Sync. On other devices, enter the same recovery code.
 4. On the device containing your notes, confirm **Upload**. Start the other devices with empty vaults and confirm **Download**.
 5. Run [the three-device acceptance checklist](docs/ACCEPTANCE.md).
 
@@ -18,7 +18,7 @@ On iPhone, place the plugin files in the vault's plugin folder using a Mac/PC or
 
 ## Daily use
 
-**Open release blocker:** an approximately 88 MB MOV caused a repeated freeze/restart loop on iPhone. This build adds durable attachment pauses after interruption or repeated processing failures, but whole-file buffering remains. See [the investigation and remaining memory work](docs/LARGE-ATTACHMENT-INVESTIGATION.md). Physical-iPhone large-file acceptance is still outstanding.
+**Open release blocker:** an approximately 88 MB MOV caused a repeated freeze/restart loop on iPhone. The identified whole-ciphertext/multipart allocation path is removed in this preview. One whole source read remains because the portable Obsidian API has no range reader; actual mobile memory and responsiveness still require measurement. See [the investigation](docs/LARGE-ATTACHMENT-INVESTIGATION.md). Physical-iPhone acceptance is outstanding.
 
 Create, edit, delete or rename files and directories normally. Sync runs roughly every three seconds while Obsidian is running. iOS can suspend the app in the background; sync resumes when the app returns to the foreground. Local editing works without the server.
 
@@ -28,17 +28,19 @@ Regular files (including attachments, Canvas and hidden files) and directories (
 
 The normal states are **Synced**, **Syncing…**, **Offline**, **Conflict** and **Sync error**. Use **Retry** after fixing a connection problem. Connection errors stop automatic aggressive retries; temporary failures are retried. The Conflict indication stays visible for the current plugin session after a conflict occurs; conflict copies remain ordinary files after restart.
 
-An attachment interrupted by app termination, or repeatedly failing during processing, pauses with **Sync error** while other files continue. Its local file remains untouched. Use **Retry** to attempt it again; reopening the app or restoring connectivity does not clear this safety pause. Ordinary offline failures still resume automatically.
+An attachment interrupted during a risky read or local write, or repeatedly failing, pauses with **Sync error** while other files continue. A checkpointed network interruption gets one automatic startup recovery attempt; another interruption pauses it. Its local file remains untouched by the pause. Use **Retry** to attempt it again; reopening the app or restoring connectivity does not clear a safety pause. Ordinary completed offline failures resume automatically with bounded backoff.
 
 ## Server requirements
 
-Use a dedicated CouchDB 3.x database exposed through valid HTTPS, with a database user permitted to read and write notes. The draft encrypted protocol stores files up to 64 KiB inline as authenticated ciphertext and larger files as encrypted attachments. Filenames, paths, modification times, hashes and exact plaintext sizes are encrypted. Configure request limits above the intended attachment size plus encryption and multipart overhead. Transfers are buffered, not streaming; source, ciphertext, multipart, native HTTP and recovery buffers can coexist. The 200 MiB protocol limit is not a promise that an encrypted transfer fits in iPhone memory. See [the transport decision and remaining gates](docs/TRANSPORT-DECISION.md). Create the database outside this plugin; BetterSync does not create databases, configure CouchDB, or change permissions. The URL can include a reverse-proxy subpath.
+Use a dedicated CouchDB 3.x database exposed through valid HTTPS, with a database user permitted to read and write notes. Schema 5 stores files up to 64 KiB inline and larger files in independently encrypted 256 KiB chunks, publishing their encrypted manifest last. Filenames, paths, modification times, hashes, exact plaintext sizes and ordered chunk associations are encrypted. Normal chunk JSON requests are below 384 KiB; there is no whole-file multipart request. Downloads append to a private local stage and verify size/hash before recoverable installation. The 200 MiB protocol limit remains; it is not demonstrated iPhone capacity. See [the protocol](docs/PROTOCOL.md). Create the database outside this plugin; BetterSync does not create databases, configure CouchDB, or change permissions. The URL can include a reverse-proxy subpath.
+
+This preview retains old and abandoned remote chunks. There is no automatic garbage collection: pending/offline clients can still need them. Storage can therefore grow after edits/deletions. Do not manually delete chunk documents. Schema-4 databases and recovery codes are refused rather than migrated; keep the old installation intact while testing a fresh schema-5 vault/database.
 
 This protocol is independent of LiveSync: **do not point it at a LiveSync database** or run another sync engine against the same test vault. Ordinary CouchDB compaction is fine. Do not purge notes or remove BetterSync's deletion-marker documents: offline clients need those markers.
 
 This development build enables draft end-to-end encryption after explicit setup. Recovery keys use Obsidian SecretStorage. Database passwords migrate to SecretStorage after verified write/readback; plugin data stores a secret reference. Use Show recovery code in settings to retrieve the vault key explicitly. Use a database-scoped account, protect the server, and do not commit or copy `data.json`.
 
-E2EE implementation includes experimental crypto, recovery-code handling, resumable key setup, Obsidian secret-storage, encrypted CouchDB transport, and integration with the existing sync engine under automated tests. The draft encrypted path is connected to setup and startup. Existing plaintext installations are blocked and require a fresh local vault and database. The UI and lifecycle have not yet been validated inside real Obsidian clients. See [the implementation plan](docs/E2EE-PLAN.md) and [benchmark instructions](docs/E2EE-BENCHMARKS.md). The encrypted wire layout remains provisional pending small-file initial-sync and physical-iPhone memory measurements.
+E2EE remains experimental. Schema-5 setup, immutable chunks, journals, restart recovery and the existing serial engine are covered by automated tests. Legacy codecs remain under `src/legacy` solely for regression tests and are absent from the plugin bundle. The layout remains provisional pending physical-iPhone measurements. See [the implementation plan](docs/CHUNKED-TRANSFER-PLAN.md) and [verification record](docs/CHUNKED-TRANSFER-VERIFICATION.md).
 
 ## Development
 

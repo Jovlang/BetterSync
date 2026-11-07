@@ -1,11 +1,11 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {EncryptionError, base64url, unbase64url, frame} from '../src/crypto';
+import {EncryptionError, base64url, unbase64url, frame} from '../src/legacy/crypto';
 import {sha256} from '@noble/hashes/sha2.js';
 import {SyncFailure} from '../src/types';
 import {generateRecoveryCode, importRecoveryCode, createConfiguration, authenticateConfiguration,
   validateConfiguration, EncryptionSetup, type SetupIntent, type SetupStorage, type SecretStore,
-  type ConfigurationRemote, type VaultConfiguration} from '../src/encryption-setup';
+  type ConfigurationRemote, type VaultConfiguration} from '../src/legacy/encryption-setup';
 
 class Storage implements SetupStorage {
   value: SetupIntent | null = null;

@@ -1,5 +1,5 @@
 import {Notice, Modal, Plugin, requestUrl, TFolder} from 'obsidian';
-import {CouchClient} from './couch-client';
+import {CouchHttp} from './couch-http';
 import {withTimeout} from './http';
 import {freshState, StateStore} from './local-state';
 import {hash} from './paths';
@@ -86,8 +86,8 @@ export default class BetterSync extends Plugin {
       modal.onClose=()=>modal.contentEl.empty();modal.open();
     }catch{new Notice('The recovery code is unavailable. Restore it from your saved copy.');}
   }
-  private client():CouchClient {
-    return new CouchClient(this.settings,this.http());
+  private client():CouchHttp {
+    return new CouchHttp(this.settings,this.http());
   }
   private http() {
     return this.transport??=withTimeout(async(url,method,headers,body,responseType)=>{
@@ -165,6 +165,7 @@ export default class BetterSync extends Plugin {
         const crypto=await setup.resume();
         if(this.unloaded)return;
         const vault=new ObsidianVault(this.app);
+        vault.assertStagingSupport();
         const remote=await EncryptedRemote.connect(this.settings,this.http(),crypto,p=>vault.allowed(p));
         if(this.unloaded)return;
         if(this.state&&this.state.binding!==remote.stateBinding)throw new Error('Existing sync progress cannot be reused with this encrypted vault.');
@@ -184,7 +185,7 @@ export default class BetterSync extends Plugin {
   }
   async testConnection():Promise<void> {
     await this.config;
-    try {await this.client().testConnection();new Notice('Connected to the sync server.');}
+    try {await this.client().request('');new Notice('Connected to the sync server.');}
     catch(error){new Notice(error instanceof Error?error.message:'Could not connect to the sync server.');}
   }
   async retry():Promise<void> {if(this.settings.enabled) {if(this.engine)await this.engine.retry();else await this.configure({});}}

@@ -1,0 +1,10 @@
+{"kind":"large","size":8388608,"uploadMs":1424.7155,"downloadMs":1205.3273,"chunkPuts":32,"maxBody":349667,"sourceLeasePeak":8388608,"chunkBytes":262144,"finalJournalBytes":319,"syntheticProcessPeakRss":240459776}
+{"kind":"large","size":33554432,"uploadMs":5242.2712999999985,"downloadMs":5180.5036,"chunkPuts":128,"maxBody":349667,"sourceLeasePeak":33554432,"chunkBytes":262144,"finalJournalBytes":319,"syntheticProcessPeakRss":367124480}
+{"kind":"large","size":88000000,"uploadMs":14091.7561,"downloadMs":13469.081300000002,"chunkPuts":336,"maxBody":349667,"sourceLeasePeak":88000000,"chunkBytes":262144,"finalJournalBytes":321,"syntheticProcessPeakRss":655421440}
+{"kind":"large","size":92274688,"uploadMs":13397.8056,"downloadMs":14637.0671,"chunkPuts":352,"maxBody":349667,"sourceLeasePeak":92274688,"chunkBytes":262144,"finalJournalBytes":319,"syntheticProcessPeakRss":674562048}
+{"kind":"large","size":209715200,"uploadMs":35356.55589999999,"downloadMs":31115.914399999994,"chunkPuts":800,"maxBody":349667,"sourceLeasePeak":209715200,"chunkBytes":262144,"finalJournalBytes":321,"syntheticProcessPeakRss":1228902400}
+{"kind":"notes","count":1000,"addedRttMs":0,"uploadMs":2550.4923,"uploadRequests":2001,"downloadMs":2994.8216999999995,"downloadRequests":103,"bulkGets":92}
+{"kind":"notes","count":1000,"addedRttMs":50,"uploadMs":125391.4188,"uploadRequests":2001,"downloadMs":9405.8082,"downloadRequests":103,"bulkGets":92}
+{"kind":"notes","count":1000,"addedRttMs":100,"uploadMs":220013.9424,"uploadRequests":2001,"downloadMs":14025.320200000016,"downloadRequests":103,"bulkGets":92}
+{"kind":"large","size":92274688,"addedRttMs":50,"uploadMs":35006.2595,"downloadMs":35363.4131,"uploadRequests":363,"downloadRequests":355,"chunkPuts":352,"maxBody":349667,"sourceLeasePeak":92274688,"chunkBytes":262144,"finalJournalBytes":321,"syntheticProcessPeakRss":624816128}
+{"kind":"large","size":92274688,"addedRttMs":100,"uploadMs":53475.674199999994,"downloadMs":54069.3288,"uploadRequests":368,"downloadRequests":355,"chunkPuts":352,"maxBody":349667,"sourceLeasePeak":92274688,"chunkBytes":262144,"finalJournalBytes":321,"syntheticProcessPeakRss":619687936}

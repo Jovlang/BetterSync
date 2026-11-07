@@ -22,7 +22,7 @@ Three or more independent Obsidian installations synchronize the same vault thro
 
 ## Excluded
 
-The active Obsidian configuration folder, `.obsidian`, local recovery trash (`.trash`), settings, plugins, themes, workspace state, P2P, WebRTC, S3, alternate backends, device registries, revision-selection UI, automatic text merging, version-history UI, chunks, compression, selective sync, profiles, compatibility modes and LiveSync migration.
+The active Obsidian configuration folder, `.obsidian`, local recovery trash (`.trash`), settings, plugins, themes, workspace state, P2P, WebRTC, S3, alternate backends, device registries, revision-selection UI, automatic text merging, version-history UI, compression, selective sync, profiles, compatibility modes and LiveSync migration. Internal fixed encrypted chunks were authorized on 7 November 2026 to fix large-file memory use; no chunk settings or second sync model are exposed.
 
 ## Safety rules
 
@@ -59,4 +59,4 @@ Apply the anti-cruft rule to future changes: if the software can make a safe dec
 
 ## E2EE work in progress — 4 November 2026
 
-The user authorized E2EE implementation after reviewing `E2EE-PLAN.md`. The development runtime now requires encrypted setup, using Obsidian SecretStorage and a recovery code. Existing plaintext installations require fresh local vaults and databases; there is no in-place migration or plaintext fallback. The fixed hybrid candidate stores small encrypted content inline and larger content as revision-qualified attachments, behind the same sync engine. Schema 4 remains provisional pending the remaining transport, security and physical-iPhone memory gates in `TRANSPORT-DECISION.md`. The 200 MiB protocol bound is not validated encrypted mobile capacity. Preserve one sync model and the existing real-device acceptance gate.
+The user authorized E2EE implementation after reviewing `E2EE-PLAN.md`, then the chunked-transfer implementation on 7 November. The development runtime requires schema-5 encrypted setup, using Obsidian SecretStorage and a recovery code. Earlier installations require fresh test vaults/databases; there is no in-place migration or plaintext fallback. Small content stays inline; larger files use immutable authenticated chunks and a manifest committed last, behind the same serial engine. Downloads use the public binary-append API (minimum Obsidian 1.12.3). Schema 5 remains provisional until physical-iPhone verification. The 200 MiB protocol bound is not validated encrypted mobile capacity. Preserve one sync model and the existing real-device acceptance gate.

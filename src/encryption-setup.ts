@@ -3,11 +3,11 @@ import {sha256} from '@noble/hashes/sha2.js';
 import {base64url, unbase64url, randomBytes, VaultCrypto, EncryptionError, CRYPTO_DOMAIN, frame} from './crypto';
 import {SyncFailure} from './types';
 
-const CODE_PREFIX = 'bse-draft1';
+const CODE_PREFIX = 'bse5';
 export const CONFIGURATION_ID = 'bettersync:configuration';
-const payload = new TextEncoder().encode(JSON.stringify({protocol: CRYPTO_DOMAIN, schema: 4}));
+const payload = new TextEncoder().encode(JSON.stringify({protocol: CRYPTO_DOMAIN, schema: 5}));
 export interface VaultConfiguration {
-  _id: typeof CONFIGURATION_ID; _rev?: string; protocol: typeof CRYPTO_DOMAIN; schema: 4;
+  _id: typeof CONFIGURATION_ID; _rev?: string; protocol: typeof CRYPTO_DOMAIN; schema: 5;
   vault: string; salt: string; nonce: string; ciphertext: string;
 }
 export function generateRecoveryCode(): string {
@@ -36,14 +36,15 @@ export async function importRecoveryCode(value: string): Promise<VaultCrypto> {
 export async function createConfiguration(crypto: VaultCrypto): Promise<VaultConfiguration> {
   const salt = base64url(randomBytes(32));
   const sealed = await crypto.seal(CONFIGURATION_ID, salt, 'configuration', payload.buffer);
-  return {_id: CONFIGURATION_ID, protocol: CRYPTO_DOMAIN, schema: 4, vault: crypto.vaultId,
+  return {_id: CONFIGURATION_ID, protocol: CRYPTO_DOMAIN, schema: 5, vault: crypto.vaultId,
     salt, nonce: sealed.nonce, ciphertext: base64url(new Uint8Array(sealed.bytes))};
 }
 export function validateConfiguration(value: unknown): VaultConfiguration {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new EncryptionError();
   const d = value as Record<string, unknown>;
+  if(d.schema!==5)throw new SyncFailure('configuration','This build requires a fresh schema-5 test vault and database. Existing sync data is unchanged.');
   if (Object.keys(d).some(k => !['_id', '_rev', 'protocol', 'schema', 'vault', 'salt', 'nonce', 'ciphertext'].includes(k))
-    || d._id !== CONFIGURATION_ID || d.protocol !== CRYPTO_DOMAIN || d.schema !== 4
+    || d._id !== CONFIGURATION_ID || d.protocol !== CRYPTO_DOMAIN || d.schema !== 5
     || (d._rev !== undefined && (typeof d._rev !== 'string' || d._rev.length > 256 || !/^[1-9][0-9]*-[A-Za-z0-9]+$/.test(d._rev))))
     throw new EncryptionError();
   unbase64url(d.vault, 16); unbase64url(d.salt, 32); unbase64url(d.nonce, 12);

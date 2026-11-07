@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {PersistentSetupStorage} from '../src/setup-storage';
-import type {SetupIntent} from '../src/encryption-setup';
+import {PersistentSetupStorage} from '../src/legacy/setup-storage';
+import type {SetupIntent} from '../src/legacy/encryption-setup';
 
 const intent: SetupIntent = {version:1,binding:'synthetic',vault:'synthetic',secretName:'synthetic',phase:'prepared',operation:'join'};
 test('failed setup saves never become visible and later retries succeed',async()=>{

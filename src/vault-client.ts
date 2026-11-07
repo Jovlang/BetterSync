@@ -1,9 +1,93 @@
 import {TFile, MarkdownView, type App} from 'obsidian';
-import {hash, hashAsync, markdown, syncPath, MAX_FILE_BYTES, decodeBinary, validateContent} from './paths';
-import type {VaultClient, Content} from './types';
+import {hash, hashAsync, rawHashAsync, markdown, syncPath, MAX_FILE_BYTES, decodeBinary, validateContent} from './paths';
+import type {VaultClient, Content, BinaryStaging, FileInspection} from './types';
 export class ObsidianVault implements VaultClient {
   private inventory=new Map<string,string>();
   constructor(private app:App) {}
+  assertStagingSupport():void {
+    if(typeof this.app.vault.adapter.appendBinary!=='function')throw new Error('BetterSync requires Obsidian 1.12.3 or later for safe attachment transfers.');
+  }
+  private stagePath(id:string):string {
+    if(!/^[A-Za-z0-9_-]{43}$/.test(id))throw new Error('Invalid staging identity.');
+    return '.trash/bettersync/stage5-'+id;
+  }
+  private async inspectDisk(path:string):Promise<FileInspection> {
+    const stat=await this.app.vault.adapter.stat(path);
+    if(!stat||stat.type!=='file'||stat.size>MAX_FILE_BYTES)throw new Error('Missing or oversized staged file.');
+    const bytes=await this.app.vault.adapter.readBinary(path);
+    if(bytes.byteLength>MAX_FILE_BYTES)throw new Error('File exceeds 200 MiB.');
+    return {size:bytes.byteLength,raw:await rawHashAsync(bytes),digest:(await hashAsync(bytes))!};
+  }
+  readonly staging:BinaryStaging={
+    reset:async id=>{this.assertStagingSupport();const p=this.stagePath(id);await this.parents(p);await this.app.vault.adapter.writeBinary(p,new ArrayBuffer(0));},
+    append:async(id,bytes)=>{this.assertStagingSupport();if(bytes.byteLength>256*1024)throw new Error('Oversized staging append.');await this.app.vault.adapter.appendBinary(this.stagePath(id),bytes);},
+    read:async id=>{const p=this.stagePath(id),s=await this.app.vault.adapter.stat(p);if(!s||s.size>MAX_FILE_BYTES)throw new Error('Invalid stage.');return this.app.vault.adapter.readBinary(p);},
+    readText:async id=>this.app.vault.adapter.read(this.stagePath(id)),
+    size:async id=>(await this.app.vault.adapter.stat(this.stagePath(id)))?.size??null,
+    inspect:async id=>this.inspectDisk(this.stagePath(id)),
+    remove:async id=>{const p=this.stagePath(id);if(await this.app.vault.adapter.exists(p))await this.app.vault.adapter.remove(p);},
+    install:async(path,id,expected,digest,mtime,client)=>this.installStaged(path,id,expected,digest,mtime,client),
+    deleteLocal:async(path,expected,client)=>this.deleteStaged(path,expected,client)
+  };
+  private async preserveDisk(path:string,source:string,digest:string,client:string):Promise<string> {
+    const dot=path.lastIndexOf('.'),ext=dot>path.lastIndexOf('/')?path.slice(dot):'',stem=ext?path.slice(0,-ext.length):path;
+    const name=stem+'.sync-conflict-'+client.slice(0,8)+'-'+digest.slice(0,24);
+    for(let i=0;i<100;i++) {
+      const candidate=name+(i?'-'+i:'')+ext;
+      if(await this.app.vault.adapter.exists(candidate)) {if((await this.inspectDisk(candidate)).digest===digest)return candidate;continue;}
+      await this.parents(candidate);
+      try {await this.app.vault.adapter.copy(source,candidate);}
+      catch(error) {if(await this.app.vault.adapter.exists(candidate))continue;throw error;}
+      if((await this.inspectDisk(candidate)).digest!==digest)throw new Error('Conflict copy verification failed.');return candidate;
+    }
+    throw new Error('Could not preserve conflict.');
+  }
+  private async installStaged(path:string,id:string,expected:string|null,digest:string,mtime:number,client:string) {
+    if(!this.allowed(path)||markdown(path)||path.endsWith('/'))throw new Error('Unsupported staged destination.');
+    const a=this.app.vault.adapter,backup=this.recoveryPath(path),conflicts:string[]=[];
+    await this.parents(path);await this.parents(backup);
+    // Recover the captured original before inspecting/accepting the destination.
+    if(await a.exists(backup)) {
+      const old=await this.inspectDisk(backup);
+      if(old.digest!==expected)conflicts.push(await this.preserveDisk(path,backup,old.digest,client));
+      if(!await a.exists(path))await a.copy(backup,path);
+      await a.remove(backup);
+    }
+    const stat=await a.stat(path);
+    if(stat&&stat.type!=='file')throw new Error('A folder occupies the destination.');
+    if(stat&&(await this.inspectDisk(path)).digest===digest)return {matched:true,conflicts};
+    if(stat) {
+      await a.rename(path,backup);
+      const captured=await this.inspectDisk(backup);
+      if(captured.digest!==expected)conflicts.push(await this.preserveDisk(path,backup,captured.digest,client));
+    }
+    try {await a.copy(this.stagePath(id),path);}
+    catch(error) {if(error&&typeof error==='object'&&'code' in error&&error.code==='EEXIST')return {matched:false,conflicts};throw error;}
+    await a.appendBinary(path,new ArrayBuffer(0),{mtime});
+    if((await this.inspectDisk(path)).digest!==digest)return {matched:false,conflicts};
+    if(await a.exists(backup))await a.remove(backup);
+    return {matched:true,conflicts};
+  }
+  private async deleteStaged(path:string,expected:string|null,client:string):Promise<string[]> {
+    if(!this.allowed(path)||markdown(path)||path.endsWith('/'))throw new Error('Unsupported staged deletion.');
+    const a=this.app.vault.adapter,backup=this.recoveryPath(path),conflicts:string[]=[];
+    await this.parents(backup);
+    // A previous replacement or deletion may have captured edits before termination.
+    if(await a.exists(backup)) {
+      const captured=await this.inspectDisk(backup);
+      if(captured.digest!==expected)conflicts.push(await this.preserveDisk(path,backup,captured.digest,client));
+      await a.trashLocal(backup);
+    }
+    const stat=await a.stat(path);
+    // A file tombstone must not remove a replacement directory.
+    if(!stat||stat.type!=='file')return conflicts;
+    await a.rename(path,backup);
+    const captured=await this.inspectDisk(backup);
+    if(captured.digest!==expected)conflicts.push(await this.preserveDisk(path,backup,captured.digest,client));
+    await a.trashLocal(backup);
+    // Any new file created at the original path stays dirty for the next cycle.
+    return conflicts;
+  }
   async fileSize(path:string):Promise<number|null> {
     if(!this.allowed(path))throw new Error('Unsupported path.');
     const stat=await this.app.vault.adapter.stat(path);

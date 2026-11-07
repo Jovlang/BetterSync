@@ -1,8 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {encryptRecord,decryptRecord,INLINE_FILE_BYTES} from '../src/encrypted-protocol';
-import {generateRecoveryCode,importRecoveryCode} from '../src/encryption-setup';
-import {base64url,unbase64url} from '../src/crypto';
+import {encryptRecord,decryptRecord,INLINE_FILE_BYTES} from '../src/legacy/encrypted-protocol';
+import {generateRecoveryCode,importRecoveryCode} from '../src/legacy/encryption-setup';
+import {base64url,unbase64url} from '../src/legacy/crypto';
 import {syncPath} from '../src/paths';
 for(const size of [0,1,INLINE_FILE_BYTES,INLINE_FILE_BYTES+1])test(`hybrid boundary ${size}: authenticated representation and substitution rejection`,async()=>{
   const key=await importRecoveryCode(generateRecoveryCode()),wrong=await importRecoveryCode(generateRecoveryCode());

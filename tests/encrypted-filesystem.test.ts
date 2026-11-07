@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {fixture,connection} from './encrypted-wire';
-import {EncryptedRemote} from '../src/encrypted-remote';
-import {importRecoveryCode} from '../src/encryption-setup';
+import {EncryptedRemote} from '../src/legacy/encrypted-remote';
+import {importRecoveryCode} from '../src/legacy/encryption-setup';
 import {syncPath} from '../src/paths';
 import {freshEncryptedTree} from './encrypted-filesystem';
 

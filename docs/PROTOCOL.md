@@ -1,106 +1,59 @@
-# Protocol and recovery
+# Schema 5 protocol and recovery
 
-## Documents
+0.5.0 test prerelease. One encrypted sync model, fresh dedicated database, no migration or mixed-schema mode. Obsidian 1.12.3+ and public DataAdapter.appendBinary are required. Earlier formats are historical in [PROTOCOL-SCHEMA4.md](PROTOCOL-SCHEMA4.md). Physical-device acceptance remains open.
 
-One document per path:
+## Records and cryptographic binding
 
-```json
-{"_id":"file:<base64url UTF-8 path>","_rev":"<server revision>","schema":1,"path":"Notes/Test.md","content":"text","mtime":0,"deleted":false}
-```
+Configuration, recovery codes (bse5), path identities (f5:), local-state binding and cryptographic domain (bettersync-e2ee-5) distinguish this format from schema 4. Authenticate configuration before file writes. HTTPS credentials and the independently held recovery key have separate roles.
 
-Path identity is deterministic and case-preserving. Paths are never normalized from server input: traversal, backslashes, absolute paths, `.obsidian` and `.trash` components are rejected. Invalid records are retained in local diagnostics while unrelated valid records continue.
+Files have deterministic keyed path identities. Each live file version has a fresh random 256-bit version ID and 256-bit HKDF salt. The manifest envelope exposes _id, optional _rev, schema/protocol/vault, salt, metadata nonce and encrypted metadata, plus inline ciphertext for small files. Encrypted metadata contains path, kind, deletion flag, mtime, exact size, raw SHA-256, version ID, ordered chunk IDs and inline nonce. Representation follows authenticated size: live files <=65,536 bytes are inline; larger files use chunks. Directories/deletion markers have no content/version/chunks.
 
-Markdown retains schema 1 and UTF-8 text. Other regular files are written as schema 3 with a raw attachment named `content`, with no JSON `content` field. Existing schema 2 binary records remain readable as base64; no database migration is required. They are rewritten as schema 3 only on a later local upload. Directories use schema 2, a trailing slash in their record path, and content `directory`. The trailing slash is removed for filesystem access. A local file/directory replacement deletes the old record identity and creates the new one. Reading the old identity returns absent; its tombstone never removes the replacement type. Incoming creations wait for the previous object to be reconciled, including when records arrive in creation-before-deletion order. Concurrent incompatible live types stay queued rather than overwriting another object. The decoded file limit is 200 MiB. Empty directories are explicit records; deleting a directory waits for its children to reconcile and never recursively deletes local data.
+Chunks contain at most 262,144 plaintext bytes, at most 800 chunks for the unchanged 209,715,200-byte file limit. The final chunk has exactly the remaining length. Chunk IDs are independent random 128-bit values prefixed c5:. Chunk envelopes contain only _id, optional _rev, schema/protocol, nonce and ciphertext. There is no content-hash naming or deduplication. Maximum encoded chunk document: 384 KiB; plaintext metadata: 64 KiB. Reject extra fields, noncanonical base64url, duplicate IDs, incorrect counts/lengths and unsafe paths.
 
-All clients should be upgraded together: old clients cannot read the expanded protocol.
+WebCrypto AES-256-GCM uses 128-bit tags and fresh 96-bit nonces on every encryption attempt. HKDF-SHA-256 derives purpose-specific keys. Canonical framing is UTF-8 fields with four-byte big-endian byte lengths. For chunk key derivation, fields are:
 
-A deletion writes `deleted: true, content: ""` using a normal revision-checked PUT (schema 1 for Markdown, schema 2 otherwise). The marker omits `_attachments`, size and hash, removing the attachment from the new revision; historical attachment storage can be reclaimed by compaction. It does **not** set CouchDB `_deleted` and is never purged by BetterSync. A newly connected client can therefore learn a deletion even after compaction. A client that has already learned a deletion may intentionally create a new note at that path using the marker's revision.
+`domain, vaultId, fileIdentity, "chunk", versionId, chunkId, decimalIndex, decimalCount, "262144", decimalExpectedLength`
 
-The database must be exclusive to BetterSync's protocol. Direct administrative purges, native CouchDB tombstones and external replication branches are outside the supported topology. BetterSync clients use ordinary optimistic writes and never create independent CouchDB revision branches.
+The HKDF salt is the version salt. Chunk AAD is:
 
-## Attachment transport
+`domain, "5", vaultId, fileIdentity, salt, "chunk", versionId, chunkId, decimalIndex, decimalCount, "262144", decimalExpectedLength`
 
-A live binary document has the following shape (CouchDB may add attachment digest and revision-position fields):
+Metadata, inline content and configuration use distinct purposes; inline content also binds version ID. Only the codec private constructor/runtime WeakSet can issue uploadable chunks. Prefixes never select whether encryption runs. Chunks are create-only PUTs without _rev; reads reject revision generations other than 1. On 409, decrypt the existing record in the expected context and compare its plaintext with the source slice. Lost acknowledgements cannot create duplicate chunk revisions; retries encrypt with fresh nonces even with stable IDs. The encrypted manifest binds the entire list, size and SHA-256.
 
-```json
-{"_id":"file:aGVyby5qcGc","_rev":"2-example","schema":3,"path":"hero.jpg","mtime":1793660375593,"deleted":false,"size":4281932,"hash":"<64 lowercase hex SHA-256 of raw bytes>","_attachments":{"content":{"stub":true,"content_type":"application/octet-stream","length":4281932}}}
-```
+## Upload and publication
 
-The size must be an integer from zero through 209,715,200 bytes. Schema 3 applies only to binary paths, requires the single named attachment, and rejects inline attachment data. Empty files use an attachment of length zero.
+Events enqueue paths; one serial engine reads files. Persist a marker before the source read. Incremental hashing yields, but Obsidian still returns one whole source buffer. Journal source digests, base revision, version/salt, chunk IDs and confirmed prefix before the first upload. Never journal source bytes or chunk ciphertext. Encrypt bounded views, never their whole backing buffer.
 
-Uploads use a single `PUT /database/document-id` with `Content-Type: multipart/related`. The first part is JSON metadata carrying the expected `_rev` and `_attachments.content` with `follows: true`, content type and byte length. The second part contains the unencoded bytes. CouchDB commits metadata and attachment together in one new revision; there is no intermediate metadata-only document. A 409 enters the existing conflict-preservation path, never an overwrite retry against a refetched revision.
+Send one chunk at a time; checkpoint after four chunks or one second, then service eligible small work in the same serial loop. A small edit discovering a large remote conflict queues that manifest instead of nesting another large read. After the last chunk, release the source before rereading/hash-checking the live file. A changed source gets a new version/IDs; an absent unpublished source is not published.
 
-`_changes?include_docs=true&attachments=false` returns attachment stubs, not attachment data. CouchDB defaults `attachments` to false; BetterSync also specifies it explicitly. `_all_docs?include_docs=true` likewise returns stubs. Schema 1 text and legacy schema 2 base64 remain inline until those binary records are edited; the lightweight guarantee applies to schema 3 binary payloads.
+Persist the exact encrypted manifest, then PUT with the original baseline revision. This is the remote atomic commit point. No manifest exposes a partial upload. Revision conflict never authorizes overwriting a newer version. On lost reply/restart, reconcile the prepared manifest against authenticated server state before requiring the source to exist. The changes-feed receive path also reconciles, including after local deletion. Persist the accepted snapshot baseline and clear its journal together; dirty events/inventory handle subsequent edits.
 
-## Transport and memory
+## Download and local safety
 
-The portable HTTP boundary supports string JSON or raw `ArrayBuffer` request bodies and explicit JSON or raw-buffer responses. The Obsidian adapter accesses `response.arrayBuffer` for attachments, without reading its JSON getter. Runtime code uses no Node, Electron, Blob/FormData transport, or base64 attachment encoding.
+Persist the authenticated manifest and expected baseline before filesystem effects. Append one authenticated chunk at a time to .trash/bettersync/stage5-<version>. Checkpoint offset, confirmed prefix and prefix SHA-256. Never concatenate a full download or retain an array of payloads.
 
-Obsidian `requestUrl` does not expose streaming requests/responses or portable cancellation. A multipart upload allocates one contiguous body in addition to the source file buffer: roughly twice the file size before native HTTP copies and other work. Downloads require a complete response buffer; local comparison, recovery and conflict preservation can also hold full file buffers. The adapter passes incoming raw buffers directly to binary staging writes instead of converting them to/from base64. Actual peak memory depends on Obsidian and platform internals, and may be considerably higher. Timed-out requests may remain alive and retain buffers until they finish. Near-limit iPhone transfers require real-device testing; the 200 MiB limit is a protocol bound, not a memory guarantee.
+On restart verify staged size/digest. The public adapter has no range reader, so prefix verification uses one temporary whole-prefix buffer, released before downloading more chunks. A partial/extra append rebuilds only the disposable stage. Verify final size/SHA-256 and staged disk readback before installation.
 
-Schema 3 incoming journals store only metadata, so state cloning and saving no longer duplicate large binary payloads. Legacy schema 2 downloads/journals still incur base64 and decoding overhead. To preserve already-installed baseline digests and deterministic conflict filenames, local binary comparison retains SHA-256 of the historical base64 representation, computed incrementally in small chunks without allocating a full base64 string. The schema 3 wire hash is separately SHA-256 of raw bytes.
+Binary installation inspects files sequentially, captures an existing target into its recovery location, preserves divergent captured contents using a verified disk-to-disk conflict copy, copies the stage to an absent destination, then verifies it. Accept the baseline before stage cleanup. A crash after capture/copy leaves the journal, stage and captured original for replay. Ambiguous/new local bytes are preserved. This is recoverable installation, not a claim that portable copy is an atomic filesystem operation. Inline binary replacement and binary deletion use the same disk-preservation boundary, avoiding overlapping full reads of a large local file. Deletion uses local trash.
 
-## Local state
+Markdown retains Vault.process and unsaved-editor protections. Large Markdown uses the chunked wire/stage but ultimately needs text/editor strings; that allocation budget differs from binary buffers. Conflict copies remain ordinary synced files.
 
-Each installation stores a random identity, database binding, opaque changes checkpoint, a per-path last-accepted revision and SHA-256 digest (or null for deletion), and any pending incoming operations. The vault remains the source of local file contents; there is no embedded sync database. Pending incoming operations contain the remote document until the local operation is completed. For schema 3 this is metadata only, including the exact revision, expected raw SHA-256, decoded size and attachment stub; binary buffers are never serialized into plugin data. Existing pending schema 2 operations remain replayable. Metadata is stored in Obsidian's local plugin data, which is never synchronized by BetterSync.
+## Feed, resource limits and retry
 
-Path dictionaries have null prototypes, restored whenever state is loaded or cloned into a new store. Filenames such as `constructor` and `__proto__` are ordinary own entries and survive JSON persistence.
+Poll _changes with include_docs=false, limit=200. Skip validated chunk IDs without their bodies and preserve original row counts for pagination. Fetch file manifests at exact reported revisions with JSON _bulk_get batches of 16. Never substitute a current revision for missing historical metadata. Invalid records become bounded rejection descriptors; foreign protocols stop writes. Chunk-only databases do not count as populated vaults during setup.
 
-The baseline detects modifications or deletes made while the plugin was disabled or the app was closed. Startup inventories paths once; normal file events queue only the affected paths. A portable stat inventory additionally discovers hidden entries and missed events. Folder renames/deletions queue their tracked descendants.
+Native HTTP has one chunk slot, two control slots and a 1 MiB per-request retained-body cap (UTF-16 string accounting). A JavaScript timeout does not free a native slot: accounting/deduplication remain until its actual promise settles, across reconfiguration. Admission precedes another large source read. A stuck chunk leaves bounded control capacity for unrelated work. Native requestUrl can buffer a hostile oversized response before validation; this is not a hard receive-memory cap against a malicious server.
 
-## Serial cycle
+Durable transfer markers contain direction, stage, size, failures, recovery budget and sanitized reason. Interrupted read/hash/verification/install phases pause immediately at startup. Interrupted chunk-network/manifest-commit phases get one durably counted startup recovery; another interruption pauses. Two processing/data failures also pause. Completed offline errors automatically retry with exponential backoff from 1 to 60 seconds; unresolved native timeouts are distinguished. Explicit Retry resets the budget; foreground/reconnect never clears a safety pause. A paused transfer retains its local source and pending journal while unrelated files continue.
 
-1. Finish persisted incoming operations where possible.
-2. Poll `_changes` with a saved, opaque checkpoint, up to 200 records per page.
-3. Validate, journal and apply records. Failed filesystem work stays journaled, allowing later files/pages to proceed. Invalid records are quarantined in local diagnostics.
-4. Save the checkpoint after the page is safely handled.
-5. Upload dirty paths using the last-accepted revision as the write precondition.
+No failed state save permits the following risky operation. Advance baselines/checkpoints only after application or durable retention. Dictionaries preserve prototype-named paths and remain database/key bound. There is no second persistence database.
 
-A new local change during HTTP work remains queued. If a server write returns 409, refetch the note and apply conflict preservation; never blindly retry an overwrite with the fresh revision.
+## Limits and retention
 
-There is one running cycle per client. Periodic polls overlap neither themselves nor configuration changes. A network timeout returns control after 15 seconds. Obsidian's HTTP API has no portable abort facility: an underlying timed-out request may finish later. Its revision precondition and the next changes-feed pass make that safe, including accepted writes whose responses were lost.
+Whole ciphertext/multipart amplification is removed. This is not true filesystem streaming, immediate garbage collection, a hard iOS RSS cap or a text-editor memory guarantee. Native reads/copy/crypto/HTTP can allocate internally. One whole source or verification buffer plus bounded chunk work is the intended application-level binary budget; real-device measurements remain required.
 
-## Incoming operation journal
+No automatic chunk garbage collection. Old/unpublished chunks may still belong to pending work or indefinitely offline clients. File deletion publishes a tombstone, never chunk deletion. Compaction is supported; purge/manual deletion and external replication branches are not. Storage retention is a disclosed preview cost.
 
-Before writing the vault, save the remote document and the local baseline digest expected by that operation. For schema 3, fetch `/database/document-id/content?rev=<journaled revision>` as raw bytes and verify both byte length and SHA-256 before any filesystem effects or baseline acceptance. A failed download or integrity check leaves the operation queued and the baseline unchanged. Retry re-fetches the exact revision; it never substitutes bytes from the latest revision. If compaction has removed an old queued revision, the operation remains pending until a later valid document from the changes feed supersedes it (or the server is repaired). Local contents and recovery bytes remain protected. On replay:
+E2EE hides metadata/content, not timing, document sizes or access patterns. It does not add freshness against replay of an entire previously valid vault history. No plaintext fallback or weakened integrity is permitted.
 
-First persist the current incoming queue again. A failed save can leave an operation only in memory; subsequent polls must not apply it until persistence succeeds.
-
-- If the local file already equals the desired remote contents, accept the baseline without rewriting.
-- If it equals the expected baseline, apply the remote version.
-- Otherwise preserve the local contents in an ordinary conflict file, then apply the remote version.
-
-Conflict copies have content-addressed names scoped to the installation, so replay finds the same contents rather than producing duplicates. If an existing conflict copy has been edited, create another distinct copy; never overwrite it.
-
-Only after the filesystem operation is successful does the engine save the accepted baseline and remove the journal entry. Startup scanning also recovers conflict copies created immediately before a crash.
-
-## Local writes and editing buffers
-
-`Vault.process` guards replacement of existing text against a changed on-disk digest. The adapter checks every open source-mode editor for the note and defers remote replacement or deletion if any buffer differs from disk, until those changes are saved. Expected-write markers suppress normal reflected vault events; digest/baseline comparison makes duplicate or delayed events harmless.
-
-Obsidian exposes no atomic compare-and-trash operation. Remote deletes recheck disk and open editing buffers immediately before `Vault.trash(file, false)`, which retains the deleted file in vault trash. A user edit in the final asynchronous deletion window is an outstanding real-device verification concern; trash is the recovery layer. This is a reason the implementation is not certified against the real-device no-data-loss acceptance gate yet.
-
-Filesystem name equivalence differs between Linux, macOS and iOS. Case-only collisions and Unicode normalization collisions need testing on the target vaults. Invalid or unwriteable notes stay queued rather than authorizing an overwrite.
-
-Unindexed Markdown replacements use `DataAdapter.process` to check the digest inside an atomic text update. Binary replacements use the already-persisted incoming operation plus a recovery file at `.trash/bettersync/<SHA-256 of path>`:
-
-1. Move the existing file into that recovery path, then verify the captured bytes. An edit between the initial read and the move is retained there and causes a retry.
-2. Stage the desired bytes separately and install them using `DataAdapter.copy`, whose contract rejects an existing destination. A local file recreated during installation is therefore not overwritten.
-3. Remove the recovery file only after installation succeeds. Before every incoming retry, including before accepting an already-matching file, inspect any recovery file. Preserve divergent bytes in a normal synced conflict copy, restore the original path if absent using a non-overwriting copy, and then clear recovery.
-
-New unindexed files and conflict copies also use staged, non-overwriting copies. Staging files are removed in normal error/success cleanup; an abrupt process termination may leave disposable staging bytes in local `.trash`. Recovery files must remain until their incoming operations finish. This requires temporary disk space for the old file and staged incoming bytes. These portable API guarantees and behavior of external writers holding open file handles still require real-device validation, as does peak memory use near 200 MiB. Hidden-file and binary deletes retain contents in local trash. Directory deletes only remove empty directories.
-
-## Failure scope
-
-Temporary network/server errors preserve all local files and retry on a later poll. Invalid credentials/database settings block repeated background retries until Retry or reconfiguration. A failed file stays in the persistent incoming queue, while unrelated files continue. Persisting metadata failures end the current cycle before a checkpoint can be accepted on disk.
-
-A server's unavailability cannot prevent a user from editing the vault; only synchronization waits. iOS background suspension pauses the plugin itself, so background real-time sync is not promised.
-
-## References
-
-- [Obsidian Vault API](https://docs.obsidian.md/Plugins/Vault)
-- [Obsidian mobile development](https://docs.obsidian.md/Plugins/Getting%20started/Mobile%20development)
-- [CouchDB changes feed](https://docs.couchdb.org/en/stable/api/database/changes.html)
-- [CouchDB document API](https://docs.couchdb.org/en/stable/api/document/common.html)
-- [CouchDB document-size configuration](https://docs.couchdb.org/en/stable/config/couchdb.html#couchdb/max_document_size)
-- [CouchDB HTTP request-size configuration](https://docs.couchdb.org/en/stable/config/http.html#chttpd/max_http_request_size)
+See [verification and device checklist](CHUNKED-TRANSFER-VERIFICATION.md), [implementation plan](CHUNKED-TRANSFER-PLAN.md) and [all ten acceptance scenarios](ACCEPTANCE.md).

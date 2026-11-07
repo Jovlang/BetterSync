@@ -1,12 +1,12 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {EncryptedRemote} from '../src/encrypted-remote';
-import {importRecoveryCode} from '../src/encryption-setup';
+import {EncryptedRemote} from '../src/legacy/encrypted-remote';
+import {importRecoveryCode} from '../src/legacy/encryption-setup';
 import {freshState, StateStore} from '../src/local-state';
 import {SyncEngine} from '../src/sync-engine';
 import {hash, hashAsync, rawHashAsync, syncPath} from '../src/paths';
-import {decryptRecord} from '../src/encrypted-protocol';
+import {decryptRecord} from '../src/legacy/encrypted-protocol';
 import type {Content, LocalSyncState, VaultClient, SyncStatus} from '../src/types';
 import type {Http} from '../src/couch-client';
 import {fixture, connection} from './encrypted-wire';

@@ -2,8 +2,8 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import type {App} from 'obsidian';
 import {ObsidianSecrets} from '../src/obsidian-secrets';
-import {CouchConfiguration} from '../src/couch-configuration';
-import {generateRecoveryCode, importRecoveryCode, createConfiguration, EncryptionSetup, CONFIGURATION_ID, type SetupIntent} from '../src/encryption-setup';
+import {CouchConfiguration} from '../src/legacy/couch-configuration';
+import {generateRecoveryCode, importRecoveryCode, createConfiguration, EncryptionSetup, CONFIGURATION_ID, type SetupIntent} from '../src/legacy/encryption-setup';
 import {SyncFailure} from '../src/types';
 import type {Http} from '../src/couch-client';
 
