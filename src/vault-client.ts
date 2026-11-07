@@ -1,9 +1,14 @@
 import {TFile, MarkdownView, type App} from 'obsidian';
-import {hash, markdown, syncPath, MAX_FILE_BYTES, decodeBinary, validateContent} from './paths';
+import {hash, hashAsync, markdown, syncPath, MAX_FILE_BYTES, decodeBinary, validateContent} from './paths';
 import type {VaultClient, Content} from './types';
 export class ObsidianVault implements VaultClient {
   private inventory=new Map<string,string>();
   constructor(private app:App) {}
+  async fileSize(path:string):Promise<number|null> {
+    if(!this.allowed(path))throw new Error('Unsupported path.');
+    const stat=await this.app.vault.adapter.stat(path);
+    return stat?.type==='file'?stat.size:null;
+  }
   allowed(path:string):boolean {
     const config=(this.app.vault.configDir??'.obsidian').normalize('NFC').toLowerCase().replace(/\/$/,'');
     const target=path.normalize('NFC').toLowerCase().replace(/\/$/,'');
@@ -92,7 +97,7 @@ export class ObsidianVault implements VaultClient {
     const content=await adapter.readBinary(backup);
     // A write just before the rename is now in the recovery file. Preserve it
     // before clearing that file, even if the remote version is already installed.
-    if(hash(content)!==expected)await preserve(content);
+    if(await hashAsync(content)!==expected)await preserve(content);
     if(!await adapter.exists(path)) {
       try {await adapter.copy(backup,path);}
       catch(error) {if(!await adapter.exists(path))throw error;}
@@ -119,7 +124,7 @@ export class ObsidianVault implements VaultClient {
     if(!this.allowed(path)) throw new Error('Unsupported path.');
     if(content!==null)validateContent(path,content);
     if(path.endsWith('/') || !markdown(path) || !this.app.vault.getAbstractFileByPath(path)) {
-      if(hash(await this.read(path))!==expected)return false;
+      if(await hashAsync(await this.read(path))!==expected)return false;
       const target=path.endsWith('/')?path.slice(0,-1):path;
       const stat=await this.app.vault.adapter.stat(target);
       if(stat && (stat.type==='folder')!==path.endsWith('/')) {
@@ -147,7 +152,7 @@ export class ObsidianVault implements VaultClient {
         await adapter.rename(path,backup);
         // The rename captures the actual bytes, including edits since the check.
         // Leave them journaled for recovery on mismatch, failure or a crash.
-        if(hash(await adapter.readBinary(backup))!==expected)return false;
+        if(await hashAsync(await adapter.readBinary(backup))!==expected)return false;
         try {
           if(mtime===undefined)await this.createUnindexed(path,content);
           else await this.createTimestampedFile(path,content,mtime);

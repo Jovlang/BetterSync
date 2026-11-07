@@ -29,6 +29,28 @@ export function decodeBinary(content:string):ArrayBuffer {
   return bytes.buffer;
 }
 export function rawHash(bytes:ArrayBuffer):string {return bytesToHex(sha256(new Uint8Array(bytes)));}
+/** Incremental CPU work with bounded scratch space; the adapter still owns a whole-file buffer.
+ * Preserve the legacy base64 digest used by baselines and conflict names exactly.
+ */
+export async function hashAsync(content:string|ArrayBuffer|null):Promise<string|null> {
+  if(!(content instanceof ArrayBuffer))return hash(content);
+  const digest=sha256.create(),bytes=new Uint8Array(content),encoder=new TextEncoder();
+  let deadline=performance.now()+8;
+  for(let i=0;i<bytes.length;i+=32766) {
+    digest.update(encoder.encode(btoa(String.fromCharCode(...bytes.subarray(i,i+32766)))));
+    if(performance.now()>=deadline) {await new Promise(resolve=>setTimeout(resolve,0));deadline=performance.now()+8;}
+  }
+  return bytesToHex(digest.digest());
+}
+export async function rawHashAsync(buffer:ArrayBuffer):Promise<string> {
+  const digest=sha256.create(),bytes=new Uint8Array(buffer);
+  let deadline=performance.now()+8;
+  for(let i=0;i<bytes.length;i+=65536) {
+    digest.update(bytes.subarray(i,i+65536));
+    if(performance.now()>=deadline) {await new Promise(resolve=>setTimeout(resolve,0));deadline=performance.now()+8;}
+  }
+  return bytesToHex(digest.digest());
+}
 export function validateContent(path:string,content:string|ArrayBuffer):void {
   if(content instanceof ArrayBuffer) {
     if(markdown(path)||path.endsWith('/'))throw new Error('Unexpected binary content.');

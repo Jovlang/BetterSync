@@ -8,6 +8,7 @@ import {SyncFailure, type Remote, type FileDocument, type Content, type Sequence
  * Journals contain the ciphertext envelope plus local metadata, never file bodies.
  */
 export class EncryptedRemote implements Remote {
+  observeTransfer(observer:(stage:string,size?:number)=>Promise<void>) {this.wire.observe=observer;}
   private constructor(private wire: EncryptedCouch, private crypto: VaultCrypto, readonly stateBinding: string) {}
   static async connect(connection: Connection, http: Http, crypto: VaultCrypto, allowedPath: (path: string) => boolean) {
     const wire = await EncryptedCouch.connect(connection, http, crypto, allowedPath);

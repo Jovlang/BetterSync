@@ -48,3 +48,19 @@ test('HTTP timeout releases the engine even if the underlying request hangs',asy
   const client=new CouchClient(connection,withTimeout(async()=>new Promise(()=>{}),5));
   await assert.rejects(()=>client.testConnection(),(e:unknown)=>e instanceof SyncFailure&&e.kind==='temporary');
 });
+
+test('timed-out native HTTP cannot accumulate duplicate requests and unrelated URLs remain usable',async()=>{
+  const {withTimeout}=await import('../src/http');
+  let calls=0,complete!:()=>void;
+  const http=withTimeout(async url=>{
+    calls++;
+    if(url.endsWith('/held'))await new Promise<void>(resolve=>{complete=resolve;});
+    return {status:200};
+  },5);
+  await assert.rejects(()=>http('https://test.invalid/held','PUT',{}));
+  await assert.rejects(()=>http('https://test.invalid/held','PUT',{}));
+  assert.equal(calls,1);
+  assert.equal((await http('https://test.invalid/other','PUT',{})).status,200);
+  complete();await new Promise(resolve=>setTimeout(resolve,0));
+  assert.equal(calls,2);
+});

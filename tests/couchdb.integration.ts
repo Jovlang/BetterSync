@@ -1,6 +1,7 @@
 /** Real CouchDB wire test. Uses disposable CI database; never a user's vault. */
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {CouchClient,type Http} from '../src/couch-client';
 import {Device,settle} from './helpers';
 import {SyncFailure} from '../src/types';
@@ -25,6 +26,33 @@ const http:Http=async(url,method,headers,body,responseType)=>{
   return responseType==='binary'?{status:response.status,arrayBuffer:await response.arrayBuffer()}:{status:response.status,json:await response.json()};
 };
 const client=()=>new CouchClient({url:'https://couchdb.test',database,...credentials},http);
+
+test('real CouchDB: 88 MiB encrypted attachment is atomic after lost upload acknowledgement and validates exact bytes',async()=>{
+  const db=database+'-large',url=`${address}/${db}`;
+  assert.equal((await fetch(url,{method:'PUT',headers:{Authorization:auth}})).status,201);
+  try {
+    const connection={url:'https://couchdb.test',database:db,...credentials};
+    const key=await importRecoveryCode(generateRecoveryCode());
+    await new CouchConfiguration(connection,http).createConfiguration(await createConfiguration(key));
+    let lose=true;
+    const lossy:Http=async(...args)=>{
+      const response=await http(...args);
+      if(lose&&args[1]==='PUT'&&args[3] instanceof ArrayBuffer){lose=false;throw new Error('lost acknowledgement');}
+      return response;
+    };
+    const remote=await EncryptedCouch.connect(connection,lossy,key,syncPath);
+    const bytes=new Uint8Array(88*1024*1024);bytes.fill(173);
+    const expected=createHash('sha256').update(bytes).digest('hex');
+    await assert.rejects(()=>remote.put({path:'synthetic.mov',bytes:bytes.buffer,deleted:false,mtime:1}));
+    const record=await remote.get('synthetic.mov');assert.ok(record?._attachments);
+    assert.match(record._rev!,/^1-/);assert.equal(record._attachments.content.length,bytes.length+16);
+    const restored=await remote.download(record);assert.ok(restored.bytes);
+    assert.equal(restored.bytes.byteLength,bytes.length);
+    assert.equal(createHash('sha256').update(new Uint8Array(restored.bytes)).digest('hex'),expected);
+    assert.equal(restored.metadata.hash,expected);
+    assert.equal((await remote.changes(0)).results.length,1);
+  } finally {assert.equal((await fetch(url,{method:'DELETE',headers:{Authorization:auth}})).status,200);}
+});
 
 test('real CouchDB: fresh mixed-file encrypted upload/download materializes identical disk trees',async()=>{
   for(const interrupted of [false,'poll','restart'] as const) {

@@ -13,6 +13,7 @@ export class StateStore {
     Object.setPrototypeOf(state.files,null);
     Object.setPrototypeOf(state.incoming,null);
     if(state.rejected) Object.setPrototypeOf(state.rejected,null);
+    if(state.transfers) Object.setPrototypeOf(state.transfers,null);
   }
   save(): Promise<void> {
     const snapshot = structuredClone(this.state);

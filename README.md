@@ -2,7 +2,7 @@
 
 Small Obsidian plugin for synchronizing vault files and directories through one self-hosted CouchDB database. Designed for desktop, laptop and phone, with no master client and no device registry.
 
-**Status: 0.3.1 E2EE prerelease, not yet device-validated.** The automated suite exercises three independent sync engines, including offline edits, conflicts and restart recovery. The ten acceptance tests on real desktop, MacBook and iPhone clients remain the release gate. Real-device testing has recorded an intermittent initial-download stall. See [the acceptance checklist](docs/ACCEPTANCE.md) for the current status.
+**Status: 0.4.0 E2EE prerelease, not yet device-validated.** The automated suite exercises three independent sync engines, including offline edits, conflicts and restart recovery. The ten acceptance tests on real desktop, MacBook and iPhone clients remain the release gate. Real-device testing has recorded an intermittent initial-download stall. See [the acceptance checklist](docs/ACCEPTANCE.md) for the current status.
 
 ## Install the test build
 
@@ -18,6 +18,8 @@ On iPhone, place the plugin files in the vault's plugin folder using a Mac/PC or
 
 ## Daily use
 
+**Open release blocker:** an approximately 88 MB MOV caused a repeated freeze/restart loop on iPhone. This build adds durable attachment pauses after interruption or repeated processing failures, but whole-file buffering remains. See [the investigation and remaining memory work](docs/LARGE-ATTACHMENT-INVESTIGATION.md). Physical-iPhone large-file acceptance is still outstanding.
+
 Create, edit, delete or rename files and directories normally. Sync runs roughly every three seconds while Obsidian is running. iOS can suspend the app in the background; sync resumes when the app returns to the foreground. Local editing works without the server.
 
 A concurrent edit preserves the local text in a normal `*.sync-conflict-<client>-<content>.md` file and converges the main path to the server version. Conflict copies also sync to the other devices. They can be compared, edited or removed normally. Deletion against a newer edit keeps the newer remote note; an offline edit against a deletion becomes a conflict copy, leaving the original path deleted.
@@ -25,6 +27,8 @@ A concurrent edit preserves the local text in a normal `*.sync-conflict-<client>
 Regular files (including attachments, Canvas and hidden files) and directories (including empty ones) synchronize. The active Obsidian configuration folder (including custom `Vault.configDir` paths), `.obsidian`, and the local recovery directory `.trash` are excluded. The fixed per-file limit is 200 MiB (209,715,200 bytes); larger files stay local and report a sync error. Settings, plugins and themes inside `.obsidian` stay local. Remote deletion uses the vault's local trash, never permanent filesystem deletion.
 
 The normal states are **Synced**, **Syncing…**, **Offline**, **Conflict** and **Sync error**. Use **Retry** after fixing a connection problem. Connection errors stop automatic aggressive retries; temporary failures are retried. The Conflict indication stays visible for the current plugin session after a conflict occurs; conflict copies remain ordinary files after restart.
+
+An attachment interrupted by app termination, or repeatedly failing during processing, pauses with **Sync error** while other files continue. Its local file remains untouched. Use **Retry** to attempt it again; reopening the app or restoring connectivity does not clear this safety pause. Ordinary offline failures still resume automatically.
 
 ## Server requirements
 

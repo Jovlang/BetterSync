@@ -1,5 +1,6 @@
 import type {Connection, Http, HttpResponse} from './couch-client';
-import {SyncFailure} from './types';
+import {SyncFailure, PendingTransferFailure} from './types';
+import {PendingRequestFailure} from './http';
 
 /** Shared portable HTTP boundary for legacy sync and draft encrypted setup. */
 export class CouchHttp {
@@ -19,7 +20,10 @@ export class CouchHttp {
     try {
       response = await this.http(this.base + path, method, {...this.headers, 'Content-Type': contentType},
         body instanceof ArrayBuffer ? body : body === undefined ? undefined : JSON.stringify(body), responseType);
-    } catch { throw new SyncFailure('temporary', 'Offline. Changes will sync when the server is available again.'); }
+    } catch(error) {
+      if(error instanceof PendingRequestFailure)throw new PendingTransferFailure();
+      throw new SyncFailure('temporary', 'Offline. Changes will sync when the server is available again.');
+    }
     if (response.status === 409) throw new SyncFailure('conflict', 'A record changed on another device.');
     if ([401, 403].includes(response.status)) throw new SyncFailure('configuration', 'Could not sign in to the sync server. Check the server address, username, and password.');
     if (response.status === 404 && responseType === 'binary') throw new SyncFailure('data', 'The queued attachment revision is unavailable. The incoming operation remains queued.');

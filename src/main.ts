@@ -27,6 +27,7 @@ export default class BetterSync extends Plugin {
   private writes:Promise<void>=Promise.resolve();
   private config:Promise<void>=Promise.resolve();
   private unloaded=false;
+  private transport?:ReturnType<typeof withTimeout>;
   async onload():Promise<void> {
     const saved=await this.loadData() as Saved|null;
     this.settings={...defaults,...saved?.settings};this.state=saved?.state;
@@ -49,8 +50,8 @@ export default class BetterSync extends Plugin {
       for(const path of Object.keys(this.state?.files??{})) if(path.startsWith(oldPath+'/')) change(path);
       for(const note of this.app.vault.getAllLoadedFiles()) if(note.path.startsWith(file.path+'/')) change(entry(note));
     }));
-    this.registerDomEvent(document,'visibilitychange',()=>{if(!document.hidden) void this.retry();});
-    this.registerDomEvent(window,'online',()=>void this.retry());
+    this.registerDomEvent(document,'visibilitychange',()=>{if(!document.hidden) void this.resume();});
+    this.registerDomEvent(window,'online',()=>void this.resume());
     this.app.workspace.onLayoutReady(()=>{if(!this.unloaded) void this.configure(this.settings);});
   }
   private setStatus(status:SyncStatus):void {
@@ -89,7 +90,7 @@ export default class BetterSync extends Plugin {
     return new CouchClient(this.settings,this.http());
   }
   private http() {
-    return withTimeout(async(url,method,headers,body,responseType)=>{
+    return this.transport??=withTimeout(async(url,method,headers,body,responseType)=>{
       const response=await requestUrl({url,method,headers,body,throw:false});
       if(responseType==='binary')return {status:response.status,arrayBuffer:response.arrayBuffer};
       let json:unknown;try{json=response.json;}catch{json=null;}
@@ -187,6 +188,7 @@ export default class BetterSync extends Plugin {
     catch(error){new Notice(error instanceof Error?error.message:'Could not connect to the sync server.');}
   }
   async retry():Promise<void> {if(this.settings.enabled) {if(this.engine)await this.engine.retry();else await this.configure({});}}
+  private async resume():Promise<void> {if(this.settings.enabled) {if(this.engine)await this.engine.tick();else await this.configure({});}}
   onunload():void {
     this.unloaded=true;if(this.timer!==undefined) window.clearInterval(this.timer);void this.engine?.stop();
   }

@@ -1,7 +1,7 @@
 {
   "id": "bettersync",
   "name": "BetterSync",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "minAppVersion": "1.11.4",
   "description": "Synchronize vault files and directories through your CouchDB server.",
   "author": "Jovlang",

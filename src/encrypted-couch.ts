@@ -5,7 +5,7 @@ import {CouchConfiguration} from './couch-configuration';
 import {authenticateConfiguration, CONFIGURATION_ID} from './encryption-setup';
 import {VaultCrypto, base64url, randomBytes, unbase64url, CRYPTO_DOMAIN} from './crypto';
 import {encryptRecord, decryptRecord, decryptMetadata, validateEncryptedRecord,
-  type EncryptedRecord, type RecordInput} from './encrypted-protocol';
+  type EncryptedRecord, type RecordInput, type TransferObserver} from './encrypted-protocol';
 import {SyncFailure, type Sequence} from './types';
 
 export type EncryptedChange = {id: string; record: EncryptedRecord} | {id: string; revision?: string; rejected: 'invalid-record'};
@@ -24,6 +24,7 @@ function opaqueId(id: unknown): id is string {
 }
 
 export class EncryptedCouch {
+  observe?:TransferObserver;
   private constructor(private transport: CouchHttp, private crypto: VaultCrypto, private allowedPath: (path: string) => boolean) {}
   static async connect(connection: Connection, http: Http, crypto: VaultCrypto, allowedPath: (path: string) => boolean): Promise<EncryptedCouch> {
     // A wrong/missing key or missing configuration cannot obtain a writable client.
@@ -60,11 +61,13 @@ export class EncryptedCouch {
     const record = await this.inspect(value);
     let body: ArrayBuffer | undefined;
     if (record._attachments) {
+      await this.observe?.('attachment-download',record._attachments.content.length-16);
       const response = await this.transport.request('/' + encodeURIComponent(record._id) + '/content?rev=' + encodeURIComponent(record._rev!),
         'GET', undefined, 'application/octet-stream', 'binary');
       if (!(response instanceof ArrayBuffer) || response.byteLength !== record._attachments.content.length) invalid();
       body = response;
     }
+    await this.observe?.('content-decryption');
     return decryptRecord(this.crypto, record, body, this.allowedPath);
   }
   /** One encryption attempt and one revision-checked PUT. No automatic conflict retry.
@@ -72,10 +75,11 @@ export class EncryptedCouch {
    */
   async put(input: RecordInput, expectedRevision?: string): Promise<EncryptedRecord> {
     if (!this.allowedPath(input.path) || (expectedRevision !== undefined && !revision(expectedRevision))) invalid();
-    const {record, body} = await encryptRecord(this.crypto, input);
+    const {record, body} = await encryptRecord(this.crypto, input, this.observe);
     if (expectedRevision !== undefined) record._rev = expectedRevision;
     let wire: unknown = record, contentType = 'application/json';
     if (body) {
+      await this.observe?.('multipart-allocation');
       const boundary = 'bettersync-' + base64url(randomBytes(24));
       const metadata = {...record, _attachments: {content: {content_type: 'application/octet-stream', follows: true, length: body.byteLength}}};
       const encoder = new TextEncoder();
@@ -86,6 +90,7 @@ export class EncryptedCouch {
       multipart.set(head); multipart.set(new Uint8Array(body), head.length); multipart.set(tail, head.length + body.byteLength);
       wire = multipart.buffer; contentType = 'multipart/related; boundary="' + boundary + '"';
     }
+    await this.observe?.('attachment-upload');
     const response = await this.transport.request('/' + encodeURIComponent(record._id), 'PUT', wire, contentType) as
       {ok?: unknown; id?: unknown; rev?: unknown} | null;
     if (!response || response.ok !== true || response.id !== record._id || !revision(response.rev)) invalid();

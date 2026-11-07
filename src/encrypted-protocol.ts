@@ -1,6 +1,6 @@
 /** Provisional hybrid encrypted codec. No network or filesystem effects. */
 import {base64urlLength, base64url, unbase64url, randomBytes, VaultCrypto, EncryptionError, CRYPTO_DOMAIN} from './crypto';
-import {MAX_FILE_BYTES, rawHash, syncPath} from './paths';
+import {MAX_FILE_BYTES, rawHashAsync, syncPath} from './paths';
 
 export const MAX_METADATA_BYTES = 16 * 1024;
 export const INLINE_FILE_BYTES = 64 * 1024;
@@ -16,6 +16,7 @@ export interface EncryptedRecord {
   _attachments?: {content: {stub: true; content_type: 'application/octet-stream'; length: number}};
 }
 export interface RecordInput {path: string; deleted: boolean; mtime: number; bytes?: ArrayBuffer}
+export type TransferObserver=(stage:string,size?:number)=>Promise<void>;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', {fatal: true});
 function fail(): never { throw new EncryptionError(); }
@@ -69,17 +70,19 @@ export function validateEncryptedRecord(value: unknown): EncryptedRecord {
   return result;
 }
 
-export async function encryptRecord(crypto: VaultCrypto, input: RecordInput): Promise<{record: EncryptedRecord; body?: ArrayBuffer}> {
+export async function encryptRecord(crypto: VaultCrypto, input: RecordInput, observe?:TransferObserver): Promise<{record: EncryptedRecord; body?: ArrayBuffer}> {
   const {path, deleted, mtime, bytes} = input;
   const liveFile = !deleted && !path.endsWith('/');
   if (liveFile !== (bytes instanceof ArrayBuffer) || (bytes && bytes.byteLength > MAX_FILE_BYTES)) fail();
   // Caller retains ownership of bytes and must not mutate them until this promise resolves.
+  await observe?.('plaintext-sha256',bytes?.byteLength);
   const metadata = validateMetadata({path, kind: path.endsWith('/') ? 'directory' : 'file', deleted, mtime,
-    size: bytes?.byteLength ?? 0, hash: bytes ? rawHash(bytes) : null,
+    size: bytes?.byteLength ?? 0, hash: bytes ? await rawHashAsync(bytes) : null,
     contentNonce: liveFile ? base64url(new Uint8Array(12)) : null});
   const id = await crypto.documentId(path), salt = base64url(randomBytes(32));
   let body: ArrayBuffer | undefined;
   if (bytes) {
+    await observe?.('content-encryption',bytes.byteLength);
     const sealed = await crypto.seal(id, salt, 'content', bytes);
     body = sealed.bytes; metadata.contentNonce = sealed.nonce;
   }
@@ -118,13 +121,13 @@ export async function decryptRecord(crypto: VaultCrypto, value: unknown, body: A
   if(record.inline!==undefined) {
     if(body!==undefined)fail();
     const bytes=await crypto.open(record._id,record.salt,'content',metadata.contentNonce!,unbase64url(record.inline,16,INLINE_FILE_BYTES+16).buffer);
-    if(bytes.byteLength!==metadata.size||rawHash(bytes)!==metadata.hash)fail();
+    if(bytes.byteLength!==metadata.size||await rawHashAsync(bytes)!==metadata.hash)fail();
     return {metadata,bytes};
   }
   if (record._attachments) {
     if (!(body instanceof ArrayBuffer) || body.byteLength !== record._attachments.content.length) fail();
     const bytes = await crypto.open(record._id, record.salt, 'content', metadata.contentNonce!, body);
-    if (bytes.byteLength !== metadata.size || rawHash(bytes) !== metadata.hash) fail();
+    if (bytes.byteLength !== metadata.size || await rawHashAsync(bytes) !== metadata.hash) fail();
     return {metadata, bytes};
   }
   if (body !== undefined) fail();
