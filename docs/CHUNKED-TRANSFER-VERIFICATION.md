@@ -4,6 +4,8 @@ Status: **0.5.0 test prerelease, not iPhone-accepted**. Publication as a prerele
 
 ## Root cause and scope of the fix
 
+**Physical-device update after the 0.5.0 release:** the user confirmed that an 88 MB `.mov` sync from iPhone to PC works. Record this as a successful representative upload on real devices. Independent hash comparison, exact byte count, device/OS versions, interruption/restart, repeated-failure isolation and download to iPhone were not reported; full device acceptance remains open.
+
 The 64 KiB value in schema 4 was an inline cutoff, not streaming. Its large-file upload retained the whole Obsidian source, one whole AES-GCM ciphertext and another whole multipart body. For 88 MiB this is approximately 264 MiB before native copies, hashing/runtime overhead and other app memory. The download/replacement path could retain multiple whole buffers too. Startup rediscovery/replay previously repeated the same risky operation; 0.4 added a breaker but did not remove the allocation amplification. The original phone run supplied no jetsam/watchdog trace, so the precise OS termination mechanism remains unproven.
 
 Schema 5 now uses 256 KiB independently authenticated chunks, durable version/IDs, create-only reconciliation and a revision-checked encrypted manifest published last. A source is read once for transfer, released, then reread to detect concurrent changes. Downloads append authenticated parts to disk, verify SHA-256/size, and install with captured-original recovery and disk-to-disk conflict preservation. Small remote binary replacements and deletion also use disk preservation. Ordinary Markdown retains its editor guards.

@@ -2,6 +2,8 @@
 
 Status: **OPEN pending physical-iPhone acceptance.** The 0.5.0 schema-5 prerelease now removes the identified whole-ciphertext/multipart allocation path, uses staged downloads and durable retry isolation, and preserves the 200 MiB limit. [Current protocol](PROTOCOL.md) · [verification and device handoff](CHUNKED-TRANSFER-VERIFICATION.md).
 
+Post-release device evidence: the user confirmed successful sync of an **88 MB `.mov` from iPhone to PC** after the 0.5.0 release. The representative upload now has real-device success evidence. Interruption/restart, repeated-failure recovery, reverse-direction transfer and full acceptance are still unconfirmed; the original OS termination cause remains unproven.
+
 The investigation below records the original schema-4 failure path and the 0.4 safeguards. Its “remaining memory constraint” section describes the pre-schema-5 state, not current code. Archived codecs under src/legacy retain regression coverage only; the plugin bundle does not include them. A whole source/verification read remains, but whole-file AES-GCM and multipart buffering do not. No jetsam/watchdog evidence has yet proven the OS-level cause of the observed termination.
 
 Observed: adding an approximately 88 MB MOV on iPhone caused Obsidian to freeze/restart repeatedly. Recovery required Airplane Mode, deleting the local video, then restoring connectivity. We have no jetsam/watchdog report or stage trace from that run. Memory exhaustion and main-thread blocking are supported failure mechanisms in the code, not a proven attribution of that particular termination.
