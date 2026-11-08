@@ -2,7 +2,7 @@
 
 Small Obsidian plugin for synchronizing vault files and directories through one self-hosted CouchDB database. Designed for desktop, laptop and phone, with no master client and no device registry.
 
-**Status: 0.5.0 schema-5 prerelease; not device-validated.** This preview replaces whole-attachment encryption/HTTP buffering with authenticated chunks and staged downloads. Use a fresh test vault/database; it cannot join a schema-4 database. The ten acceptance tests on real desktop, MacBook and iPhone, plus the 88 MB iPhone reproduction, remain the release gate. See [implementation evidence and remaining device checks](docs/CHUNKED-TRANSFER-VERIFICATION.md).
+**Status: 0.5.1 schema-5 performance prerelease; full device acceptance remains open.** An 88 MB MOV upload from iPhone to PC was confirmed on 0.5.0. This update improves hashing and repeated validation without changing the wire format or baseline digests; existing 0.5.0 installations can keep their database and local state. Earlier schema-4 installations still require a fresh test vault/database. See [performance results](docs/PERFORMANCE-0.5.md) and [remaining device checks](docs/CHUNKED-TRANSFER-VERIFICATION.md).
 
 ## Install the test build
 

@@ -8,10 +8,22 @@ import {sha256} from '@noble/hashes/sha2.js';
 import {bytesToHex} from '@noble/hashes/utils.js';
 import {preserveConflict} from './conflict-handler';
 import {SyncFailure,type Remote,type FileDocument,type Content,type Sequence,type TransferContext,type Baseline,type UploadResult,type Incoming} from './types';
+type TimedStage='read'|'baselineHash'|'metadata'|'encrypt'|'uploadRequest'|'downloadRequest'|'append'|'verify'|'install';
 
 export class EncryptedRemote implements Remote {
   private context?:TransferContext;
   readonly diagnostics={sourceBytes:0,peakSourceBytes:0,maxChunkBytes:0,uploadedChunks:0,downloadedChunks:0};
+  readonly timings:Partial<Record<TimedStage,{calls:number;ms:number}>>={};
+  private async timed<T>(stage:TimedStage,operation:()=>Promise<T>):Promise<T> {
+    const start=performance.now();
+    try {return await operation();}finally{const total=this.timings[stage]??={calls:0,ms:0};total.calls++;total.ms+=performance.now()-start;}
+  }
+  private report(direction:'upload'|'download',size:number) {
+    if(!Number.isSafeInteger(size)||size<=INLINE_FILE_BYTES)return;
+    const stages=Object.entries(this.timings).map(([name,t])=>`${name}_ms=${Math.round(t.ms)} ${name}_calls=${t.calls}`).join(' ');
+    const journal=this.ctx().store.diagnostics;
+    this.ctx().log(`transfer performance scope=session direction=${direction} bytes=${size} ${stages} journal_saves=${journal.saves} journal_clone_ms=${Math.round(journal.cloneMs)} journal_write_ms=${Math.round(journal.writeMs)}`);
+  }
   private constructor(private wire:EncryptedCouch,private crypto:VaultCrypto,readonly stateBinding:string) {}
   static async connect(connection:Connection,http:Http,crypto:VaultCrypto,allowed:(p:string)=>boolean) {
     const wire=await EncryptedCouch.connect(connection,http,crypto,allowed);
@@ -54,6 +66,7 @@ export class EncryptedRemote implements Remote {
       const r=validateEncryptedRecord(op.prepared),prepared=await decryptMetadata(this.crypto,r,this.wire.allowed);
       if(r._rev!==undefined||r._id!==op.id||r.salt!==op.salt||!this.sameVersion(prepared,m))invalid();
     }
+    op.metadata=m;
   }
   private sameVersion(a:LogicalMetadata,b:LogicalMetadata) {
     return a.path===b.path&&a.kind===b.kind&&a.deleted===b.deleted&&a.version===b.version&&a.mtime===b.mtime&&a.size===b.size&&a.hash===b.hash&&JSON.stringify(a.chunks)===JSON.stringify(b.chunks);
@@ -76,11 +89,11 @@ export class EncryptedRemote implements Remote {
     }
     if((await ctx.vault.fileSize?.(path)??0)>INLINE_FILE_BYTES)this.wire.assertChunkAvailable();
     await ctx.stage(path,'local-read');
-    let content=await ctx.vault.read(path);
+    let content=await this.timed('read',()=>ctx.vault.read(path));
     if(content!==null)validateContent(path,content);
     await ctx.stage(path,'source-hash',content instanceof ArrayBuffer?content.byteLength:undefined);
-    const digest=await hashAsync(content);
-    if(digest===(base?.hash??null)) {delete outgoing[path];await ctx.store.save();return {kind:'unchanged'};}
+    const digest=await this.timed('baselineHash',()=>hashAsync(content));
+    if(digest===(base?.hash??null)) {if(op){delete outgoing[path];await ctx.store.save();}return {kind:'unchanged'};}
     // Unchanged inventory must not cost a network request per file.
     if(latest===undefined)latest=await this.wire.get(path);
     if(latest&&latest._rev!==base?.rev) {delete outgoing[path];await ctx.store.save();return {kind:'conflict',doc:await this.logical(latest)};}
@@ -88,11 +101,12 @@ export class EncryptedRemote implements Remote {
     let bytes:ArrayBuffer|undefined=content===null||path.endsWith('/')?undefined:content instanceof ArrayBuffer?content:
       path.endsWith('.md')?new TextEncoder().encode(content).buffer:decodeBinary(content);
     const deleted=content===null;content=null;
+    const sourceSize=bytes?.byteLength??0;
     const mtime=await ctx.vault.modificationTime?.(path)??Date.now();
     try {
       this.diagnostics.sourceBytes=bytes?.byteLength??0;this.diagnostics.peakSourceBytes=Math.max(this.diagnostics.peakSourceBytes,this.diagnostics.sourceBytes);
       if(!op||op.digest!==digest||op.base!==base?.rev||op.metadata.size!==(bytes?.byteLength??0)||op.metadata.hash!==(bytes?await rawHashAsync(bytes):null)) {
-        const metadata=await prepareMetadata(path,bytes,deleted,mtime);
+        const metadata=await this.timed('metadata',()=>prepareMetadata(path,bytes,deleted,mtime));
         op={id:await this.identity(path),salt:base64url(randomBytes(32)),metadata,digest,base:base?.rev,next:0};outgoing[path]=op;
         if(!metadata.chunks.length)op.prepared=await sealManifest(this.crypto,metadata,op.salt,bytes);
         await ctx.store.save();
@@ -124,18 +138,21 @@ export class EncryptedRemote implements Remote {
         }
         throw error;
       }
-    } finally {bytes=undefined;this.release();}
+    } finally {bytes=undefined;this.release();this.report('upload',sourceSize);}
   }
-  private async currentDigest(path:string) {return hashAsync(await this.ctx().vault.read(path));}
+  private async currentDigest(path:string) {
+    const content=await this.timed('read',()=>this.ctx().vault.read(path));
+    return this.timed('baselineHash',()=>hashAsync(content));
+  }
   private async sendChunk(op:Outgoing,index:number,source:ArrayBuffer) {
     const c={fileId:op.id,salt:op.salt,metadata:op.metadata,index};
     const bytes=new Uint8Array(source,index*CHUNK_BYTES,Math.min(CHUNK_BYTES,source.byteLength-index*CHUNK_BYTES));
     this.diagnostics.maxChunkBytes=Math.max(this.diagnostics.maxChunkBytes,bytes.byteLength);
     const ctx=this.ctx();ctx.log(`transfer upload stage=chunk-encrypt bytes=${op.metadata.size} chunk=${index+1}/${op.metadata.chunks.length} source-live=${this.diagnostics.sourceBytes}`);
-    const sealed=await EncryptedChunk.seal(this.crypto,c,bytes);
+    const sealed=await this.timed('encrypt',()=>EncryptedChunk.seal(this.crypto,c,bytes));
     const usage=this.wire.usage();
     ctx.log(`transfer upload stage=chunk-request bytes=${op.metadata.size} chunk=${index+1}/${op.metadata.chunks.length} pending=${usage?usage.chunks+usage.controls:'unavailable'} held=${usage?.bytesHeld??'unavailable'}`);
-    await this.wire.putChunk(sealed,c,bytes);
+    await this.timed('uploadRequest',()=>this.wire.putChunk(sealed,c,bytes));
   }
   private async restorePrefix(operation:Incoming) {
     const ctx=this.ctx(),stage=ctx.vault.staging!,s=operation.staged!;
@@ -147,6 +164,9 @@ export class EncryptedRemote implements Remote {
     if(bytesToHex(h.clone().digest())!==s.prefixHash)return null;return h;
   }
   async applyLocal(value:FileDocument,operation:Incoming):Promise<{digest:string|null;conflicts:string[]}|undefined> {
+    try {return await this.applyLocalMeasured(value,operation);}finally{this.report('download',value.size??0);}
+  }
+  private async applyLocalMeasured(value:FileDocument,operation:Incoming):Promise<{digest:string|null;conflicts:string[]}|undefined> {
     const doc=await this.validateIncoming(value),r=doc.manifest!,m=await decryptMetadata(this.crypto,r,this.wire.allowed);
     const binary=m.kind==='file'&&!doc.path.endsWith('.md');
     if(!m.chunks.length&&!binary)return undefined;
@@ -160,7 +180,7 @@ export class EncryptedRemote implements Remote {
     if(s&&(s.id!==m.version||!Number.isInteger(s.next)||s.next<0||s.next>m.chunks.length||
       (m.chunks.length?s.offset!==Math.min(s.next*CHUNK_BYTES,m.size):s.offset!==0&&s.offset!==m.size)||typeof s.prefixHash!=='string'||!/^[a-f0-9]{64}$/.test(s.prefixHash)))invalid();
     await ctx.stage(doc.path,'stage-verification',m.size);
-    let h=s?await this.restorePrefix(operation):null;
+    let h=s?await this.timed('verify',()=>this.restorePrefix(operation)):null;
     if(!s||!h) {
       s={id:m.version!,next:0,offset:0,prefixHash:bytesToHex(sha256(new Uint8Array()))};operation.staged=s;
       await ctx.store.save();await stage.reset(s.id);h=sha256.create();
@@ -175,15 +195,16 @@ export class EncryptedRemote implements Remote {
     let checkpoint=performance.now();
     for(let i=s.next;i<m.chunks.length;i++) {
       if(ctx.stopped())throw new SyncFailure('temporary','Transfer suspended.');
-      const bytes=await this.wire.downloadChunk({fileId:r._id,salt:r.salt,metadata:m,index:i});
-      await stage.append(s.id,bytes);h.update(new Uint8Array(bytes));
+      const bytes=await this.timed('downloadRequest',()=>this.wire.downloadChunk({fileId:r._id,salt:r.salt,metadata:m,index:i}));
+      const stageId=s.id;await this.timed('append',()=>stage.append(stageId,bytes));h.update(new Uint8Array(bytes));
       s.next=i+1;s.offset+=bytes.byteLength;s.prefixHash=bytesToHex(h.clone().digest());
       this.diagnostics.downloadedChunks++;ctx.log(`transfer download stage=chunk-staged bytes=${m.size} chunk=${s.next}/${m.chunks.length}`);
       if(s.next%4===0||performance.now()-checkpoint>=1000||s.next===m.chunks.length) {await ctx.store.save();await ctx.cooperate(doc.path);checkpoint=performance.now();}
     }
     if(s.offset!==m.size||bytesToHex(h.digest())!==m.hash)invalid();
     await ctx.stage(doc.path,'stage-verification',m.size);
-    const verified=await stage.inspect(s.id);if(verified.size!==m.size||verified.raw!==m.hash)invalid();
+    const stageId=s.id;
+    const verified=await this.timed('verify',()=>stage.inspect(stageId));if(verified.size!==m.size||verified.raw!==m.hash)invalid();
     s.complete=true;await ctx.store.save();await ctx.stage(doc.path,'local-write',m.size);
     const conflicts:string[]=[];
     if(doc.path.endsWith('.md')) {
@@ -197,7 +218,7 @@ export class EncryptedRemote implements Remote {
       }
     } else {
       for(let i=0;i<8;i++) {
-        const result=await stage.install(doc.path,s.id,operation.expected,verified.digest,m.mtime,ctx.store.state.clientId);conflicts.push(...result.conflicts);
+        const result=await this.timed('install',()=>stage.install(doc.path,stageId,operation.expected,verified.digest,m.mtime,ctx.store.state.clientId));conflicts.push(...result.conflicts);
         if(result.matched)return {digest:verified.digest,conflicts};
       }
     }

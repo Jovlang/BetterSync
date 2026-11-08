@@ -134,7 +134,7 @@ test('failed binary transfer can be retried explicitly after repair without rese
   for(const d of devices)assert.equal((await d.vault.read('repair.bin') as ArrayBuffer).byteLength,128*1024);
 });
 
-test('event bursts never read binaries; failed marker persistence prevents a read; incremental digest preserves baseline compatibility',async()=>{
+test('event bursts never read binaries; failed marker persistence prevents a read; incremental digest preserves baseline compatibility',async(t)=>{
   const {devices}=await clients();const [a]=devices;
   const bytes=new Uint8Array(1024*1024+2);bytes.fill(213);
   a!.vault.files.set('event.bin',bytes.buffer);a!.vault.reads=0;
@@ -142,6 +142,8 @@ test('event bursts never read binaries; failed marker persistence prevents a rea
   assert.equal(a!.vault.reads,0);
   a!.failSave(s=>s.transfers?.['event.bin']?.active===true);
   await a!.engine.tick();assert.equal(a!.vault.reads,0);
+  // Exercise expiration of the CPU budget, independent of machine/hash speed.
+  let elapsed=0;t.mock.method(performance,'now',()=>elapsed+=9);
   let yielded=false;const timer=setTimeout(()=>{yielded=true;},0);
   assert.equal(await hashAsync(bytes.buffer),hash(bytes.buffer));
   clearTimeout(timer);assert.ok(yielded);

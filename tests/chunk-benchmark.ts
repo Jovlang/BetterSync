@@ -30,7 +30,8 @@ if(mode!=='notes')for(const {size,rtt} of cases) {
     assert.equal(a.remote.diagnostics.peakSourceBytes,size);assert.equal(a.remote.diagnostics.sourceBytes,0);
     console.log(JSON.stringify({kind:'large',size,addedRttMs:rtt,uploadMs,downloadMs,uploadRequests,downloadRequests:requests,chunkPuts:f.wire.chunkPuts,maxBody:f.wire.maxBody,
       sourceLeasePeak:a.remote.diagnostics.peakSourceBytes,chunkBytes:a.remote.diagnostics.maxChunkBytes,
-      finalJournalBytes:JSON.stringify(a.disk).length,syntheticProcessPeakRss:peakRss}));
+      finalJournalBytes:JSON.stringify(a.disk).length,syntheticProcessPeakRss:peakRss,
+      uploadTimings:a.remote.timings,downloadTimings:b.remote.timings}));
   } finally {clearInterval(sampler);await a.close();await b.close();}
 }
 if(mode==='all'||mode==='notes')for(const rtt of [0,50,100]) {

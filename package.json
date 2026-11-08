@@ -1,6 +1,6 @@
 {
   "name": "bettersync",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,6 +10,7 @@
     "verify": "npm run check && npm test && npm run build",
     "test:integration": "node --import tsx --test tests/*.integration.ts",
     "benchmark:chunks": "node --import tsx tests/chunk-benchmark.ts",
+    "benchmark:hash": "node --import tsx tests/hash-benchmark.ts",
     "benchmark:e2ee:codec": "node --import tsx tests/encryption-benchmark.ts",
     "benchmark:e2ee:sync": "node --import tsx tests/sync-benchmark.ts"
   },

@@ -7,6 +7,7 @@ export class PersistenceFailure extends Error {}
 /** Serial persistence: an older save can never finish after a newer save. */
 export class StateStore {
   private tail: Promise<void> = Promise.resolve();
+  readonly diagnostics={saves:0,cloneMs:0,writeMs:0};
   constructor(public state: LocalSyncState, private write: (state: LocalSyncState) => Promise<void>) {
     // JSON and structuredClone restore ordinary prototypes. Normalize every
     // loaded state, retaining own entries such as a file named __proto__.
@@ -17,8 +18,13 @@ export class StateStore {
     if(state.outgoing) Object.setPrototypeOf(state.outgoing,null);
   }
   save(): Promise<void> {
+    const start=performance.now();
     const snapshot = structuredClone(this.state);
-    const next = this.tail.then(() => this.write(snapshot)).catch(() => {throw new PersistenceFailure('Could not save sync progress. Check available storage and retry.');});
+    this.diagnostics.saves++;this.diagnostics.cloneMs+=performance.now()-start;
+    const next = this.tail.then(async() => {
+      const started=performance.now();
+      try {await this.write(snapshot);}finally{this.diagnostics.writeMs+=performance.now()-started;}
+    }).catch(() => {throw new PersistenceFailure('Could not save sync progress. Check available storage and retry.');});
     this.tail = next.catch(() => {});
     return next;
   }

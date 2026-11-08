@@ -18,6 +18,9 @@ export interface Outgoing {
 }
 export interface StagedDownload {id:string;next:number;offset:number;prefixHash:string;complete?:boolean}
 const encoder=new TextEncoder(),decoder=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true});
+// Only snapshots validated here are reusable. Freezing both levels prevents
+// mutation after validation; JSON/journal reloads must pass validation again.
+const validatedMetadata=new WeakSet<object>();
 export function invalid():never {throw new EncryptionError();}
 export function object(value:unknown):Record<string,unknown> {
   if(!value||typeof value!=='object'||Array.isArray(value))invalid();return value as Record<string,unknown>;
@@ -27,6 +30,7 @@ export function revision(value:unknown):value is string {return typeof value==='
 export function fileId(value:unknown):value is string {return typeof value==='string'&&/^f5:[A-Za-z0-9_-]{43}$/.test(value)&&base64urlLength(value.slice(3),32)===32;}
 export function chunkId(value:unknown):value is string {return typeof value==='string'&&/^c5:[A-Za-z0-9_-]{22}$/.test(value)&&base64urlLength(value.slice(3),16)===16;}
 export function validateMetadata(value:unknown):LogicalMetadata {
+  if(value&&typeof value==='object'&&validatedMetadata.has(value))return value as LogicalMetadata;
   const d=object(value);exact(d,['path','kind','deleted','mtime','size','hash','version','chunks','contentNonce']);
   if(typeof d.path!=='string'||!syncPath(d.path)||encoder.encode(d.path).length>4096||decoder.decode(encoder.encode(d.path))!==d.path
     ||!['file','directory'].includes(d.kind as string)||(d.kind==='directory')!==d.path.endsWith('/')||typeof d.deleted!=='boolean'
@@ -40,7 +44,8 @@ export function validateMetadata(value:unknown):LogicalMetadata {
       if(d.contentNonce!==null||d.chunks.length!==Math.ceil((d.size as number)/CHUNK_BYTES)||!d.chunks.every(chunkId)||new Set(d.chunks).size!==d.chunks.length)invalid();
     } else {if(d.chunks.length)invalid();unbase64url(d.contentNonce,12);}
   }
-  return {...d,chunks:[...d.chunks]} as unknown as LogicalMetadata;
+  const result={...d,chunks:[...d.chunks]} as unknown as LogicalMetadata;
+  Object.freeze(result.chunks);Object.freeze(result);validatedMetadata.add(result);return result;
 }
 export function validateEncryptedRecord(value:unknown):EncryptedRecord {
   const d=object(value);exact(d,['_id','_rev','schema','protocol','vault','salt','nonce','metadata','inline']);
@@ -58,11 +63,11 @@ export async function prepareMetadata(path:string,bytes:ArrayBuffer|undefined,de
     contentNonce:live&&!large?base64url(new Uint8Array(12)):null});
 }
 export async function sealManifest(crypto:VaultCrypto,metadata:LogicalMetadata,salt:string,inline?:ArrayBuffer):Promise<EncryptedRecord> {
-  const m=validateMetadata(metadata),id=await crypto.documentId(m.path);
+  let m=validateMetadata(metadata);const id=await crypto.documentId(m.path);
   let body:string|undefined;
   if(!m.deleted&&m.kind==='file'&&!m.chunks.length) {
     if(!inline||inline.byteLength!==m.size||await rawHashAsync(inline)!==m.hash)invalid();
-    const sealed=await crypto.seal(id,salt,'content',inline,[m.version!]);m.contentNonce=sealed.nonce;body=base64url(new Uint8Array(sealed.bytes));
+    const sealed=await crypto.seal(id,salt,'content',inline,[m.version!]);m={...m,contentNonce:sealed.nonce};body=base64url(new Uint8Array(sealed.bytes));
   } else if(inline!==undefined)invalid();
   const encoded=encoder.encode(JSON.stringify(m));if(encoded.byteLength>MAX_METADATA_BYTES)invalid();
   const sealed=await crypto.seal(id,salt,'metadata',encoded);
