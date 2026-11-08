@@ -65,3 +65,47 @@ The full encrypted/staged size and latency runs use `npm run benchmark:chunks --
 All size cases retain the same 349,667-byte maximum chunk JSON request, 262,144-byte plaintext chunk and one-source accounting. The CPU improvements do not remove the network round-trip floor or prove lower native iOS RSS. Post-commit rechecks remain outside the benchmark's first upload tick; time until the UI reports Synced can include another poll/read.
 
 The release package is `bettersync-0.5.1.zip` (main.js and manifest.json). Test it on the existing schema-5 test vault/database, preserve plugin data/recovery keys, and compare the same 88 MB movie in both directions. Record elapsed time and the sanitized performance summary; repeat restart/retry checks before promoting it.
+
+## Follow-up: slow but completed 83 MB download on 0.5.1
+
+On 8 November the user reported that an approximately 83 MB MKV eventually completes downloading to iPhone on 0.5.1, after minutes displaying Syncing. Earlier failure messages were reported without exact text. This establishes completion for this transfer, not a diagnosis of those errors or completion of the real-device acceptance checklist. The filename is permitted by the current path rules; the reported size is below 200 MiB.
+
+`npm run benchmark:download` isolates download costs with a generated 83,000,000-byte file and the current production engine, crypto, timeout wrapper and disk adapter. One source upload is reused across four fresh destinations. Added request/save delays are synthetic sensitivity inputs, not observed iPhone timings. Raw results are in `download-performance-benchmarks.jsonl`.
+
+| Added delay per request | Added delay per state save | Time to first Synced |
+|---|---|---|
+| 0 ms | 0 ms | 6.95 s |
+| 100 ms | 0 ms | 41.79 s |
+| 0 ms | 100 ms | 16.45 s |
+| 100 ms | 100 ms | 50.58 s |
+
+All four runs verified exact destination SHA-256 and completed in the initial cycle, with 327 HTTP requests (317 chunk reads), 94 state saves, 317 data appends plus one empty append for mtime, and two full-file reads totaling 166 MB. Maximum serialized state was 13,208 bytes in this one-file vault; larger vaults can cost more per save. The two reads are stage verification and installed-file verification. They include raw and compatible-baseline hashing; together their timed stages cost about 4.4–5.1 seconds here, while actual read I/O totaled about 0.09–0.12 seconds. This points to hashing/other verification work rather than disk-read latency on this host, not necessarily on iPhone.
+
+The Windows timer overshot the injected 100 ms waits: the network-delay-only run spent 35.19 seconds in the HTTP wrapper, and the save-delay-only run spent 9.98 seconds in state persistence. Report measured totals rather than treating the nominal delays as exact. These are single runs, not statistical estimates. The fixture does not simulate bandwidth limits, native bridge costs, physical iPhone memory pressure, Obsidian filesystem events, or production saveData. Setup/configuration connection precedes timing; first-download initialization is included. No additional cycles were needed here, which does not exclude event-driven rechecks on a real device or subsequent inventory rechecks.
+
+### Next optimization target
+
+The strongest measured target is the serial chunk-request wait: 317 chunks impose a nominal 31.7-second floor at 100 ms per request, before bandwidth/CPU/storage. A fixed two-request download window is worth prototyping next. It must retain the existing per-request size bound, explicitly account for at most two live native requests including timed-out requests, authenticate each chunk, append/checkpoint only a contiguous prefix, stop scheduling after failure, and retain capacity for unrelated small-file work. This is a proposal, not an implemented or measured speedup. Do not merely increase the transport slot limit: the download loop is serial and needs a bounded coordinator with restart/corruption/offline tests and isolated CouchDB verification.
+
+State-save latency is a secondary measured cost. Four-chunk checkpoints alone account for 80 saves in this case; the one-second threshold can increase the count on slower links. Any batching change must preserve write-ahead stages and safe prefix replay. Removing final file verification or trusting mtime/size is not justified by these results.
+
+This investigation adds a reproducible benchmark and documentation only. Plugin runtime, schema, transfer limits and release version remain unchanged. Physical iPhone latency, memory and all ten acceptance scenarios remain separate open checks.
+
+## Implemented follow-up — 0.5.2 download pairs
+
+After the investigation, the user authorized implementation. Downloads now fetch a fixed pair concurrently, wait for both authenticated outcomes, then append in manifest order. A failed member discards the pair without advancing its prefix. No next pair starts before the previous pair has been handled. At most two chunk downloads are admitted; uploads remain exclusive. Timed-out native requests retain their slots and block new chunks until actual settlement, including when only one expired request remains. Two control slots remain independent. There is no setting or format change.
+
+Durable prefix checkpoints, final stage/installed-file verification and conflict preservation remain. Checkpoint accounting uses four newly appended chunks rather than an absolute even boundary, so recovery from a write failure after the first member of a pair also checkpoints correctly. Bounded pair buffering adds at most two authenticated plaintext chunks (512 KiB), plus bounded codec/response work; native/internal allocations and full-file verification buffers still require iPhone measurement.
+
+The same 83 MB experiment produced these single-run observations. Raw follow-up data is in `download-window-benchmarks.jsonl`; preceding data is preserved in `download-performance-benchmarks.jsonl`.
+
+| Added request / save latency | Serial download | Paired download |
+|---|---|---|
+| 0 / 0 ms | 6.95 s | 6.16 s |
+| 100 / 0 ms | 41.79 s | 23.93 s |
+| 0 / 100 ms | 16.45 s | 16.42 s |
+| 100 / 100 ms | 50.58 s | 34.89 s |
+
+At 100 ms added request latency, wall time falls approximately 43%; with slow saves too, approximately 31%. All cases retain 327 requests, 94 saves, two whole-file verification reads and exact destination SHA-256. This overlaps network waits rather than reducing traffic or durability. State-save-dominated work remains largely unchanged. Runs are synthetic and not statistical/iPhone performance guarantees. The benchmark and `downloadRequest` diagnostic timers sum overlapping requests, so their sum can exceed wall-clock duration after this change.
+
+Validation includes the full verify suite and five isolated CouchDB integration tests. New three-client tests cover reversed reply order, rejected/corrupted pairs, restart/retry, and a partial local write leaving an odd prefix. Transport tests cover the two-read bound, lingering timeout admission, exclusive uploads and independent controls. The existing suite retains 88 MiB transfers, crash/offline recovery, conflicts, corruption and deletion. The real-wire tests ran against a disposable CouchDB 3.5 container on loopback 25985 without vault mounts; it was removed afterward. No personal database was accessed. The 0.5.2 package remains a prerelease pending physical-iPhone speed/memory checks and the complete real-device acceptance gate.

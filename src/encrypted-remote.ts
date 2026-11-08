@@ -192,14 +192,24 @@ export class EncryptedRemote implements Remote {
       h=sha256.create().update(new Uint8Array(bytes));s.offset=m.size;s.prefixHash=bytesToHex(h.clone().digest());await ctx.store.save();
     }
     await ctx.stage(doc.path,'chunk-network',m.size);
-    let checkpoint=performance.now();
-    for(let i=s.next;i<m.chunks.length;i++) {
+    let checkpoint=performance.now(),checkpointNext=s.next;
+    for(let first=s.next;first<m.chunks.length;first+=2) {
       if(ctx.stopped())throw new SyncFailure('temporary','Transfer suspended.');
-      const bytes=await this.timed('downloadRequest',()=>this.wire.downloadChunk({fileId:r._id,salt:r.salt,metadata:m,index:i}));
-      const stageId=s.id;await this.timed('append',()=>stage.append(stageId,bytes));h.update(new Uint8Array(bytes));
-      s.next=i+1;s.offset+=bytes.byteLength;s.prefixHash=bytesToHex(h.clone().digest());
-      this.diagnostics.downloadedChunks++;ctx.log(`transfer download stage=chunk-staged bytes=${m.size} chunk=${s.next}/${m.chunks.length}`);
-      if(s.next%4===0||performance.now()-checkpoint>=1000||s.next===m.chunks.length) {await ctx.store.save();await ctx.cooperate(doc.path);checkpoint=performance.now();}
+      // A fixed pair bounds response/plaintext retention. Settle both before
+      // writing or yielding to other work; never leave an unobserved rejection
+      // or let an out-of-order result advance the durable contiguous prefix.
+      const pair=await Promise.allSettled(Array.from({length:Math.min(2,m.chunks.length-first)},(_,offset)=>
+        this.timed('downloadRequest',()=>this.wire.downloadChunk({fileId:r._id,salt:r.salt,metadata:m,index:first+offset}))));
+      for(const result of pair)if(result.status==='rejected')throw result.reason;
+      for(const result of pair) {
+        if(ctx.stopped())throw new SyncFailure('temporary','Transfer suspended.');
+        if(result.status!=='fulfilled')invalid();
+        const bytes=result.value,stageId=s.id;
+        await this.timed('append',()=>stage.append(stageId,bytes));h.update(new Uint8Array(bytes));
+        s.next++;s.offset+=bytes.byteLength;s.prefixHash=bytesToHex(h.clone().digest());
+        this.diagnostics.downloadedChunks++;ctx.log(`transfer download stage=chunk-staged bytes=${m.size} chunk=${s.next}/${m.chunks.length}`);
+      }
+      if(s.next-checkpointNext>=4||performance.now()-checkpoint>=1000||s.next===m.chunks.length) {await ctx.store.save();await ctx.cooperate(doc.path);checkpoint=performance.now();checkpointNext=s.next;}
     }
     if(s.offset!==m.size||bytesToHex(h.digest())!==m.hash)invalid();
     await ctx.stage(doc.path,'stage-verification',m.size);

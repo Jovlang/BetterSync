@@ -15,8 +15,8 @@ export class EncryptedCouch {
     await authenticateConfiguration(crypto,await new CouchConfiguration(connection,http).getConfiguration());
     return new EncryptedCouch(connection,http,crypto,allowed);
   }
-  assertChunkAvailable() {
-    try {(this.http as Http&{assertChunkAvailable?:()=>void}).assertChunkAvailable?.();}
+  assertChunkAvailable(download=false) {
+    try {(this.http as Http&{assertChunkAvailable?:(download?:boolean)=>void}).assertChunkAvailable?.(download);}
     catch(error) {if(error instanceof PendingRequestFailure)throw new PendingTransferFailure();throw error;}
   }
   usage() {return (this.http as Http&{usage?:()=>{chunks:number;controls:number;bytesHeld:number}}).usage?.();}
@@ -56,7 +56,7 @@ export class EncryptedCouch {
     }
   }
   async downloadChunk(c:ChunkContext):Promise<ArrayBuffer> {
-    this.assertChunkAvailable();const raw=await this.raw(c.metadata.chunks[c.index]!);
+    this.assertChunkAvailable(true);const raw=await this.raw(c.metadata.chunks[c.index]!);
     if(raw===null)throw new SyncFailure('data','A required encrypted part is missing. Pending work is retained.');
     return openChunk(this.crypto,c,raw);
   }

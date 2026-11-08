@@ -40,8 +40,11 @@ npm run benchmark:chunks -- large    # 8/32 MiB, 88 MB, 88 MiB, 200 MiB
 npm run benchmark:chunks -- notes    # 1,000 notes, 0/50/100 ms added RTT
 npm run benchmark:chunks -- latency  # 88 MiB, 50/100 ms added RTT
 npm run benchmark:hash              # paired 0.5/current baseline-hash timing
+npm run benchmark:download          # 83 MB download: isolate HTTP and state-save latency
 ```
 
 They assert exact SHA-256, chunk counts and payload bounds. Aggregate Node RSS includes the in-process server's retained ciphertext and test adapter copies; it is not plugin-only or iPhone peak memory. Results and the device handoff are in [CHUNKED-TRANSFER-VERIFICATION.md](CHUNKED-TRANSFER-VERIFICATION.md). On Windows, Docker may be run through WSL using the same Compose file; use the isolated loopback endpoint from the Windows test process.
 
 The 0.5.1 performance changes and measurements are documented in [PERFORMANCE-0.5.md](PERFORMANCE-0.5.md). The paired hash benchmark preserves the historical algorithm only as a benchmark reference; the plugin has one implementation. Full chunk benchmarks include aggregate stage timings. The session-level `transfer performance` console record also reports journal clone/write costs for real-device diagnosis, without paths or payloads.
+
+The download sensitivity benchmark uploads one generated 83,000,000-byte file, then downloads it to four fresh synthetic clients with 0/100 ms added request latency crossed with 0/100 ms added state-save latency. It uses the production timeout wrapper, crypto, engine and disk adapter, checks the destination SHA-256, and reports requests, whole-file reads, appends, journal saves/serialization size and time to Synced. Poll scheduling delays are excluded. State persistence is simulated; these delays and Windows disk timings are not measurements of Obsidian on iPhone. It contacts no real server or vault.
