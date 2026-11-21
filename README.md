@@ -53,7 +53,7 @@ npm ci
 npm run verify
 ```
 
-This runs strict TypeScript checks, the automated tests and the browser-targeted build. The output `main.js` only imports Obsidian; runtime code uses neither Node nor Electron. `@noble/hashes` provides platform-independent SHA-256. There is no PouchDB or second local database.
+This runs strict TypeScript checks, the automated tests and the browser-targeted build. The output `main.js` imports Obsidian and has one guarded, lazy `node:fs/promises` import for an empty-directory deletion regression in Obsidian's desktop filesystem adapter; mobile remains on the portable adapter path. `@noble/hashes` provides platform-independent SHA-256. There is no PouchDB or second local database.
 
 GitHub Actions additionally starts a disposable CouchDB service and runs:
 

@@ -7,10 +7,10 @@ import type {App} from 'obsidian';
 import type {ObsidianVault as VaultAdapter} from '../src/vault-client';
 
 test('portable adapter inventories hidden files, preserves bytes, defers nonempty directory deletes and skips oversized reads',async()=>{
-  const bundle=await build({entryPoints:['src/vault-client.ts'],bundle:true,write:false,format:'esm',platform:'browser',plugins:[{
+  const bundle=await build({entryPoints:['src/vault-client.ts'],bundle:true,write:false,format:'esm',platform:'browser',external:['node:fs/promises'],plugins:[{
     name:'mock-obsidian',setup(b){
       b.onResolve({filter:/^obsidian$/},()=>({path:'obsidian',namespace:'mock'}));
-      b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:'export class TFile{};export class TFolder{};export class MarkdownView{};'}));
+      b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:'export class FileSystemAdapter{};export class TFile{};export class TFolder{};export class MarkdownView{};export const Platform={isDesktopApp:false};'}));
     }
   }]});
   const {ObsidianVault}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0]!.text).toString('base64'));
@@ -54,6 +54,8 @@ const bundle=await build({
       builder.onLoad({filter:/.*/,namespace:'test-host'},()=>({contents:`
         export class TFile { constructor(path) { this.path=path; } }
         export class TFolder {}
+        export class FileSystemAdapter {}
+        export const Platform={isDesktopApp:false};
         export class MarkdownView {
           constructor(file,value) { this.file=file; this.value=value; this.editor={getValue:()=>this.value}; }
           getMode() { return 'source'; }

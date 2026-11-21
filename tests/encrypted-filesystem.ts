@@ -13,10 +13,10 @@ import {SyncEngine} from '../src/sync-engine';
 import type {LocalSyncState, SyncStatus} from '../src/types';
 
 export async function diskHost() {
-  const bundle=await build({entryPoints:['src/vault-client.ts'],bundle:true,write:false,format:'esm',platform:'browser',plugins:[{
+  const bundle=await build({entryPoints:['src/vault-client.ts'],bundle:true,write:false,format:'esm',platform:'browser',external:['node:fs/promises'],plugins:[{
     name:'synthetic-host',setup(b){
       b.onResolve({filter:/^obsidian$/},()=>({path:'obsidian',namespace:'mock'}));
-      b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:'export class TFile{};export class MarkdownView{};'}));
+      b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:'export class FileSystemAdapter{};export class TFile{};export class MarkdownView{};export const Platform={isDesktopApp:false};'}));
     }
   }]});
   const Host=(await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0]!.text).toString('base64'))).ObsidianVault as new(app:App)=>ObsidianVault;

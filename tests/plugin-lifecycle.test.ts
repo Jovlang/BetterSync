@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 
 async function plugin() {
-  const bundle=await build({entryPoints:['src/main.ts'],bundle:true,write:false,format:'esm',platform:'browser',plugins:[{
+  const bundle=await build({entryPoints:['src/main.ts'],bundle:true,write:false,format:'esm',platform:'browser',external:['node:fs/promises'],plugins:[{
     name:'mock-obsidian',setup(b){
       b.onResolve({filter:/^obsidian$/},()=>({path:'obsidian',namespace:'mock'}));
-      b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:`export class Plugin{};export class Notice{};export class Modal{};export class PluginSettingTab{};export class Setting{};export class TFolder{};export class TFile{};export class MarkdownView{};export async function requestUrl(){throw new Error('Unexpected HTTP');}`}));
+      b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:`export class Plugin{};export class Notice{};export class Modal{};export class PluginSettingTab{};export class Setting{};export class FileSystemAdapter{};export class TFolder{};export class TFile{};export class MarkdownView{};export const Platform={isDesktopApp:false};export async function requestUrl(){throw new Error('Unexpected HTTP');}`}));
     }
   }]});
   const {default:Plugin}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0]!.text).toString('base64'));

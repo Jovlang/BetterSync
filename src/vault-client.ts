@@ -1,4 +1,4 @@
-import {TFile, MarkdownView, type App} from 'obsidian';
+import {FileSystemAdapter, TFile, MarkdownView, Platform, type App} from 'obsidian';
 import {hash, hashAsync, rawHashAsync, markdown, syncPath, MAX_FILE_BYTES, decodeBinary, validateContent} from './paths';
 import type {VaultClient, Content, BinaryStaging, FileInspection} from './types';
 export class ObsidianVault implements VaultClient {
@@ -204,6 +204,21 @@ export class ObsidianVault implements VaultClient {
     if(markdown(path))await this.app.vault.create(path,content as string,{mtime});
     else await this.app.vault.createBinary(path,typeof content==='string'?decodeBinary(content):content,{mtime});
   }
+  private async removeEmptyDirectory(path:string):Promise<void> {
+    const adapter=this.app.vault.adapter;
+    try {await adapter.rmdir(path,false);return;}
+    catch(error) {
+      const code=error&&typeof error==='object'&&'code' in error?error.code:undefined;
+      if(!Platform.isDesktopApp || !(adapter instanceof FileSystemAdapter) || (code!=='ERR_FS_EISDIR'&&code!=='EPERM'))throw error;
+    }
+    // Native rmdir atomically refuses a child created after the earlier list.
+    const {rmdir}=await import('node:fs/promises');
+    try {await rmdir(adapter.getFullPath(path));}
+    catch(error) {
+      if(error&&typeof error==='object'&&'code' in error&&error.code==='ENOENT')return;
+      throw error;
+    }
+  }
   async compareAndSet(path:string,expected:string|null,content:Content|null,mtime?:number):Promise<boolean> {
     if(!this.allowed(path)) throw new Error('Unsupported path.');
     if(content!==null)validateContent(path,content);
@@ -217,7 +232,7 @@ export class ObsidianVault implements VaultClient {
       }
       if(content===null) {
         if(!await this.app.vault.adapter.exists(target))return true;
-        if(path.endsWith('/')) {const children=await this.app.vault.adapter.list(target);if(children.files.length||children.folders.length)throw new Error('Directory is not empty.');await this.app.vault.adapter.rmdir(target,false);}
+        if(path.endsWith('/')) {const children=await this.app.vault.adapter.list(target);if(children.files.length||children.folders.length)throw new Error('Directory is not empty.');await this.removeEmptyDirectory(target);}
         else await this.app.vault.adapter.trashLocal(target);
       } else if(expected===null)await this.create(path,content,mtime);
       else if(!path.endsWith('/')) {

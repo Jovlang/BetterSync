@@ -9,10 +9,10 @@ import {hash,encodeBinary} from '../src/paths';
 import type {SyncStatus} from '../src/types';
 import {MemoryRemote} from './helpers';
 
-const bundle=await build({entryPoints:['src/vault-client.ts'],bundle:true,write:false,format:'esm',platform:'browser',plugins:[{
+const bundle=await build({entryPoints:['src/vault-client.ts'],bundle:true,write:false,format:'esm',platform:'browser',external:['node:fs/promises'],plugins:[{
   name:'obsidian-host',setup(builder){
     builder.onResolve({filter:/^obsidian$/},()=>({path:'obsidian',namespace:'host'}));
-    builder.onLoad({filter:/.*/,namespace:'host'},()=>({contents:'export class TFile{};export class MarkdownView{};'}));
+    builder.onLoad({filter:/.*/,namespace:'host'},()=>({contents:'export class FileSystemAdapter{};export class TFile{};export class MarkdownView{};export const Platform={isDesktopApp:false};'}));
   }
 }]});
 const {ObsidianVault}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0]!.text).toString('base64')) as {
