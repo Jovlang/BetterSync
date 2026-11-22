@@ -26,23 +26,29 @@ test('two native chunk requests stay bounded after timeout; controls work and tr
 });
 
 for(const failure of ['none','offline'] as const)test(`upload pair orders reversed replies and resumes its contiguous prefix: ${failure}`,async()=>{
-  const f=await fixture();let active=0,peak=0,calls=0,firstRelease:(()=>void)|undefined;
+  const f=await fixture();let active=0,peak=0,injected=false,source:Awaited<ReturnType<typeof device>>|undefined;
+  let markFirstEntered:(()=>void)|undefined,markSecondStored:(()=>void)|undefined;
+  const firstEntered=new Promise<void>(resolve=>{markFirstEntered=resolve;}),secondStored=new Promise<void>(resolve=>{markSecondStored=resolve;});
   const http:Http=async(...args)=>{
     if(args[1]!=='PUT'||!decodeURIComponent(args[0]).includes('/c5:'))return f.wire.http(...args);
-    const n=++calls;active++;peak=Math.max(peak,active);
+    const id=decodeURIComponent(new URL(args[0]).pathname.split('/').at(-1)!);
+    const index=source?.disk.outgoing?.['upload-window.bin']?.metadata.chunks.indexOf(id)??-1;
+    assert.ok(index>=0);active++;peak=Math.max(peak,active);
     try {
-      if(n%2===1&&n<5) {
-        await new Promise<void>(resolve=>{firstRelease=resolve;});
-        if(failure==='offline'&&n===1)throw new Error('synthetic offline');
+      if(index===0&&!injected) {
+        markFirstEntered?.();await secondStored;
+        if(failure==='offline'){injected=true;throw new Error('synthetic offline');}
+        return await f.wire.http(...args);
       }
-      else if(n%2===0) {
-        const release=firstRelease;setTimeout(()=>release?.(),10);
+      else if(index===1&&!injected) {
+        await firstEntered;
+        try {return await f.wire.http(...args);}finally{markSecondStored?.();}
       }
       return await f.wire.http(...args);
     }finally{active--;}
   };
   const remote=()=>EncryptedRemote.connect(connection,withTimeout(http),f.key,syncPath);
-  const a=await device(await remote()),b=await device(await remote()),c=await device(await remote());
+  source=await device(await remote());const a=source,b=await device(await remote()),c=await device(await remote());
   try {
     await a.engine.start();await b.engine.start();await c.engine.start();
     const bytes=new Uint8Array(CHUNK_BYTES*4+17);for(let i=0;i<bytes.length;i++)bytes[i]=(i>>>18)+1;
@@ -55,7 +61,7 @@ for(const failure of ['none','offline'] as const)test(`upload pair orders revers
     await settle(a,b,c);
     for(const d of [a,b,c])assert.deepEqual(new Uint8Array(await d.host.vault.read('upload-window.bin') as ArrayBuffer),bytes);
     assert.equal(peak,2);assert.equal(a.remote.diagnostics.uploadedChunks,Math.ceil(bytes.length/CHUNK_BYTES));
-  }finally{firstRelease?.();await a.close();await b.close();await c.close();}
+  }finally{markFirstEntered?.();markSecondStored?.();await a.close();await b.close();await c.close();}
 });
 
 test('append failure between paired chunks resumes an odd prefix and checkpoints four new chunks',async()=>{
