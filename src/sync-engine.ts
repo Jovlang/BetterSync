@@ -39,7 +39,7 @@ export class SyncEngine {
     const state=this.store.state,maps=[state.files,state.incoming,state.transfers,state.outgoing];let changed=false;
     for(const map of maps)if(map)for(const path of Object.keys(map))if(!this.ownsPath(path)) {
       const staged=map===state.incoming?state.incoming[path]?.staged?.id:undefined;
-      if(staged)try{await this.vault.staging?.remove(staged);}catch{this.ui.log('excluded staging cleanup deferred');}
+      if(staged)try{await this.vault.staging?.remove(staged);}catch{this.ui.log('excluded staging cleanup failed; orphan retained');}
       delete map[path];changed=true;
     }
     if(changed)await this.store.save();
