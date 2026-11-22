@@ -109,3 +109,22 @@ The same 83 MB experiment produced these single-run observations. Raw follow-up 
 At 100 ms added request latency, wall time falls approximately 43%; with slow saves too, approximately 31%. All cases retain 327 requests, 94 saves, two whole-file verification reads and exact destination SHA-256. This overlaps network waits rather than reducing traffic or durability. State-save-dominated work remains largely unchanged. Runs are synthetic and not statistical/iPhone performance guarantees. The benchmark and `downloadRequest` diagnostic timers sum overlapping requests, so their sum can exceed wall-clock duration after this change.
 
 Validation includes the full verify suite and five isolated CouchDB integration tests. New three-client tests cover reversed reply order, rejected/corrupted pairs, restart/retry, and a partial local write leaving an odd prefix. Transport tests cover the two-read bound, lingering timeout admission, exclusive uploads and independent controls. The existing suite retains 88 MiB transfers, crash/offline recovery, conflicts, corruption and deletion. The real-wire tests ran against a disposable CouchDB 3.5 container on loopback 25985 without vault mounts; it was removed afterward. No personal database was accessed. The 0.5.2 package remains a prerelease pending physical-iPhone speed/memory checks and the complete real-device acceptance gate.
+
+## Implemented follow-up — bounded upload pairs
+
+The remaining large-transfer latency was measured again on 22 November 2026. Uploads still sent all 352 chunks serially even though downloads used a fixed pair. At 50 ms added request latency, an 88 MiB upload took 27.84 seconds and accumulated 19.41 seconds in chunk upload requests. At 100 ms it took 46.56 seconds and accumulated 37.18 seconds in those requests. These paired before/after runs used the same Windows/Node synthetic fixture; they are not physical-device measurements.
+
+Uploads now encrypt and submit a fixed pair of immutable chunks, settle both outcomes, and advance only the contiguous confirmed prefix. A rejected pair persists any successful prefix before returning the error. Create conflicts from lost acknowledgements are authenticated only after both upload requests settle, preventing upload/download admission overlap while retaining exact-byte reconciliation. Checkpoints still occur after four newly confirmed contiguous chunks, after one second, and at completion. Manifest publication remains last.
+
+The transport admits at most two upload requests or two download requests, never a mixture. A timed-out native request continues occupying the shared chunk window until it actually settles. Two control requests remain independent. The additional bounded live upload work is at most two 256 KiB plaintext views and two sub-384 KiB encrypted JSON requests; the existing whole-source read is unchanged and still requires physical-iPhone measurement.
+
+| Added request latency | Serial upload | Paired upload | Observed reduction |
+|---|---:|---:|---:|
+| 50 ms | 27.84 s | 18.98 s | 31.8% |
+| 100 ms | 46.56 s | 28.10 s | 39.6% |
+
+Both paired runs retained 352 immutable chunk writes, the 262,144-byte plaintext chunk size and the 349,667-byte maximum JSON request. Request totals differ slightly because longer transfers permit more cooperative metadata polls. Aggregate `uploadRequest` timings overlap after this change and can exceed wall-clock time. Raw comparison rows are in `upload-window-benchmarks.jsonl`.
+
+Fresh zero-added-latency runs also showed no regression: 88 MiB uploaded in 6.66 seconds and 200 MiB in 15.40 seconds, versus the earlier serial observations of 7.40 and 16.10 seconds. These are separate single runs and therefore indicative rather than controlled estimates.
+
+`npm run verify` passes TypeScript, all 198 automated tests and the browser build. Coverage includes three clients, reversed response order, an offline member with a durable one-chunk prefix, restart/retry, lost-acknowledgement authentication, two-upload timeout retention, direction isolation and the existing crash/offline/corruption/conflict suite. This remains automated/synthetic evidence only. It does not complete the ten-scenario desktop, MacBook and iPhone acceptance gate.

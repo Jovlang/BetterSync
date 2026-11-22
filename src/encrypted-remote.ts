@@ -123,16 +123,35 @@ export class EncryptedRemote implements Remote {
       }
       if(op.metadata.chunks.length) {
         if(!bytes)invalid();
-        await ctx.stage(path,'chunk-network',bytes.byteLength);
-        let checkpoint=performance.now();
-        for(let i=op.next;i<op.metadata.chunks.length;i++) {
+        const source=bytes;
+        await ctx.stage(path,'chunk-network',source.byteLength);
+        let checkpoint=performance.now(),checkpointNext=op.next;
+        for(let first=op.next;first<op.metadata.chunks.length;first+=2) {
           if(ctx.stopped()) {await ctx.store.save();return {kind:'changed'};}
           this.wire.assertChunkAvailable();
-          await this.sendChunk(op,i,bytes);
-          op.next=i+1;this.diagnostics.uploadedChunks++;
-          ctx.log(`transfer upload stage=chunk-confirmed bytes=${op.metadata.size} chunk=${op.next}/${op.metadata.chunks.length}`);
-          if(op.next%4===0||performance.now()-checkpoint>=1000||op.next===op.metadata.chunks.length) {
-            await ctx.store.save();await ctx.cooperate(path);checkpoint=performance.now();
+          // Immutable chunk IDs make a fixed pair retry-safe. Settle the pair,
+          // then advance only its contiguous successful prefix; a later member
+          // may already exist remotely and is authenticated on the next retry.
+          const pair=await Promise.allSettled(Array.from({length:Math.min(2,op.metadata.chunks.length-first)},(_,offset)=>
+            this.sendChunk(op,first+offset,source)));
+          let failure:unknown,failed=false,contiguous=true;
+          for(const result of pair) {
+            if(result.status==='rejected') {if(!failed)failure=result.reason;failed=true;contiguous=false;continue;}
+            if(!result.value.created) {
+              try {await this.timed('uploadRequest',()=>this.wire.verifyChunk(result.value.context,result.value.expected));}
+              catch(error) {if(!failed)failure=error;failed=true;contiguous=false;continue;}
+            }
+            this.diagnostics.uploadedChunks++;
+            if(contiguous)op.next++;
+            ctx.log(`transfer upload stage=chunk-confirmed bytes=${op.metadata.size} chunk=${op.next}/${op.metadata.chunks.length}`);
+          }
+          if(failed) {
+            if(op.next>checkpointNext)await ctx.store.save();
+            throw failure;
+          }
+          if(ctx.stopped()) {await ctx.store.save();return {kind:'changed'};}
+          if(op.next-checkpointNext>=4||performance.now()-checkpoint>=1000||op.next===op.metadata.chunks.length) {
+            await ctx.store.save();await ctx.cooperate(path);checkpoint=performance.now();checkpointNext=op.next;
           }
         }
         // Drop all source references before reading the live source again.
@@ -162,7 +181,8 @@ export class EncryptedRemote implements Remote {
     const sealed=await this.timed('encrypt',()=>EncryptedChunk.seal(this.crypto,c,bytes));
     const usage=this.wire.usage();
     ctx.log(`transfer upload stage=chunk-request bytes=${op.metadata.size} chunk=${index+1}/${op.metadata.chunks.length} pending=${usage?usage.chunks+usage.controls:'unavailable'} held=${usage?.bytesHeld??'unavailable'}`);
-    await this.timed('uploadRequest',()=>this.wire.putChunk(sealed,c,bytes));
+    const created=await this.timed('uploadRequest',()=>this.wire.putChunk(sealed,c,bytes,true));
+    return {created,context:c,expected:bytes};
   }
   private async restorePrefix(operation:Incoming) {
     const ctx=this.ctx(),stage=ctx.vault.staging!,s=operation.staged!;

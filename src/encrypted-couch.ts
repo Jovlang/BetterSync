@@ -45,17 +45,22 @@ export class EncryptedCouch {
     const r=object(await this.transport.request('/'+encodeURIComponent(record._id),'PUT',{...record,...(expected?{_rev:expected}:{})}));
     if(r.ok!==true||r.id!==record._id||!revision(r.rev))invalid();return {...record,_rev:r.rev};
   }
-  async putChunk(sealed:EncryptedChunk,c:ChunkContext,expected:Uint8Array<ArrayBuffer>):Promise<void> {
+  async putChunk(sealed:EncryptedChunk,c:ChunkContext,expected:Uint8Array<ArrayBuffer>,deferConflict=false):Promise<boolean> {
     if(!EncryptedChunk.isIssued(sealed)||sealed.record._id!==c.metadata.chunks[c.index])invalid();
     this.assertChunkAvailable();
     try {
       const r=object(await this.transport.request('/'+encodeURIComponent(sealed.record._id),'PUT',sealed.record));
       if(r.ok!==true||r.id!==sealed.record._id||!revision(r.rev)||!r.rev.startsWith('1-'))invalid();
+      return true;
     } catch(error) {
       if(!(error instanceof SyncFailure)||error.kind!=='conflict')throw error;
-      const actual=new Uint8Array(await this.downloadChunk(c));
-      if(actual.length!==expected.length||actual.some((b,i)=>b!==expected[i]))invalid();
+      if(deferConflict)return false;
+      await this.verifyChunk(c,expected);return false;
     }
+  }
+  async verifyChunk(c:ChunkContext,expected:Uint8Array<ArrayBuffer>):Promise<void> {
+    const actual=new Uint8Array(await this.downloadChunk(c));
+    if(actual.length!==expected.length||actual.some((b,i)=>b!==expected[i]))invalid();
   }
   async downloadChunk(c:ChunkContext):Promise<ArrayBuffer> {
     this.assertChunkAvailable(true);const raw=await this.raw(c.metadata.chunks[c.index]!);

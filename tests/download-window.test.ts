@@ -7,7 +7,7 @@ import {syncPath} from '../src/paths';
 import {CHUNK_BYTES} from '../src/encrypted-protocol';
 import type {Http,HttpResponse} from '../src/couch-client';
 
-test('two native downloads stay bounded after timeout; controls work and uploads remain exclusive',async()=>{
+test('two native chunk requests stay bounded after timeout; controls work and transfer directions do not mix',async()=>{
   const pending:((r:HttpResponse)=>void)[]=[];
   const wrapped=withTimeout(()=>new Promise(resolve=>pending.push(resolve)),10);
   const get=(id:string)=>wrapped('https://test.invalid/db/_all_docs','POST',{},JSON.stringify({keys:['c5:'+id]}));
@@ -23,6 +23,37 @@ test('two native downloads stay bounded after timeout; controls work and uploads
   const upload=assert.rejects(wrapped('https://test.invalid/db/c5%3Aupload','PUT',{},'{}'),PendingRequestFailure);
   await assert.rejects(get('third'),PendingRequestFailure);
   await upload;assert.equal(pending.length,4);pending[3]!({status:200});
+});
+
+for(const failure of ['none','offline'] as const)test(`upload pair orders reversed replies and resumes its contiguous prefix: ${failure}`,async()=>{
+  const f=await fixture();let active=0,peak=0,calls=0,firstRelease:(()=>void)|undefined,fail=failure==='offline';
+  const http:Http=async(...args)=>{
+    if(args[1]!=='PUT'||!decodeURIComponent(args[0]).includes('/c5:'))return f.wire.http(...args);
+    const n=++calls;active++;peak=Math.max(peak,active);
+    try {
+      if(n%2===1&&n<5)await new Promise<void>(resolve=>{firstRelease=resolve;});
+      else if(n%2===0) {
+        const release=firstRelease;setTimeout(()=>release?.(),10);
+        if(fail){fail=false;throw new Error('synthetic offline');}
+      }
+      return await f.wire.http(...args);
+    }finally{active--;}
+  };
+  const remote=()=>EncryptedRemote.connect(connection,withTimeout(http),f.key,syncPath);
+  const a=await device(await remote()),b=await device(await remote()),c=await device(await remote());
+  try {
+    await a.engine.start();await b.engine.start();await c.engine.start();
+    const bytes=new Uint8Array(CHUNK_BYTES*4+17);for(let i=0;i<bytes.length;i++)bytes[i]=(i>>>18)+1;
+    await a.host.seed('upload-window.bin',bytes);await a.engine.changed('upload-window.bin');await a.engine.tick();
+    assert.equal(peak,2);assert.equal(active,0);
+    if(failure==='offline') {
+      assert.equal(a.disk.outgoing?.['upload-window.bin']?.next,1);
+      await a.restart();await a.engine.retry();
+    }
+    await settle(a,b,c);
+    for(const d of [a,b,c])assert.deepEqual(new Uint8Array(await d.host.vault.read('upload-window.bin') as ArrayBuffer),bytes);
+    assert.equal(peak,2);
+  }finally{firstRelease?.();await a.close();await b.close();await c.close();}
 });
 
 test('append failure between paired chunks resumes an odd prefix and checkpoints four new chunks',async()=>{

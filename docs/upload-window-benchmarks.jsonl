@@ -1,0 +1,9 @@
+{"implementation":"serial-upload","size":92274688,"addedRttMs":50,"uploadMs":27844.9498,"downloadMs":17258.15,"uploadRequests":363,"downloadRequests":355,"chunkPuts":352,"maxBody":349667}
+{"implementation":"serial-upload","size":92274688,"addedRttMs":100,"uploadMs":46556.8353,"downloadMs":26046.073,"uploadRequests":368,"downloadRequests":355,"chunkPuts":352,"maxBody":349667}
+{"implementation":"paired-upload","size":92274688,"addedRttMs":50,"uploadMs":18983.5039,"downloadMs":17394.3658,"uploadRequests":360,"downloadRequests":355,"chunkPuts":352,"maxBody":349667}
+{"implementation":"paired-upload","size":92274688,"addedRttMs":100,"uploadMs":28102.2437,"downloadMs":25842.1269,"uploadRequests":363,"downloadRequests":355,"chunkPuts":352,"maxBody":349667}
+{"implementation":"paired-upload","size":8388608,"addedRttMs":0,"uploadMs":655.742,"downloadMs":602.3615,"uploadRequests":36,"downloadRequests":34,"chunkPuts":32,"maxBody":349667}
+{"implementation":"paired-upload","size":33554432,"addedRttMs":0,"uploadMs":2429.16,"downloadMs":2224.9752,"uploadRequests":132,"downloadRequests":130,"chunkPuts":128,"maxBody":349667}
+{"implementation":"paired-upload","size":88000000,"addedRttMs":0,"uploadMs":6261.547,"downloadMs":6028.993,"uploadRequests":340,"downloadRequests":339,"chunkPuts":336,"maxBody":349667}
+{"implementation":"paired-upload","size":92274688,"addedRttMs":0,"uploadMs":6659.9992,"downloadMs":6304.7197,"uploadRequests":357,"downloadRequests":355,"chunkPuts":352,"maxBody":349667}
+{"implementation":"paired-upload","size":209715200,"addedRttMs":0,"uploadMs":15396.9401,"downloadMs":14391.2837,"uploadRequests":806,"downloadRequests":806,"chunkPuts":800,"maxBody":349667}

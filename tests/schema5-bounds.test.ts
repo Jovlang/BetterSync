@@ -9,17 +9,20 @@ import {EncryptedChunk,prepareMetadata,openChunk,validateMetadata,sealManifest,d
 import {base64url,randomBytes} from '../src/crypto';
 import type {Http,HttpResponse} from '../src/couch-client';
 
-test('native timeouts retain one chunk and two control slots until actual settlement',async()=>{
+test('native timeouts retain one chunk pair and two control slots until actual settlement',async()=>{
   const pending:((r:HttpResponse)=>void)[]=[];
   const native:Http=()=>new Promise(resolve=>pending.push(resolve));
   const wrapped=withTimeout(native,5) as Http&{usage:()=>{chunks:number;controls:number;bytesHeld:number}};
-  await assert.rejects(()=>wrapped('https://synthetic/db/c5%3Afirst','PUT',{},'ciphertext'),PendingRequestFailure);
+  await Promise.all([
+    assert.rejects(()=>wrapped('https://synthetic/db/c5%3Afirst','PUT',{},'ciphertext'),PendingRequestFailure),
+    assert.rejects(()=>wrapped('https://synthetic/db/c5%3Asecond','PUT',{},'ciphertext'),PendingRequestFailure)
+  ]);
   for(let i=0;i<30;i++)await assert.rejects(()=>wrapped('https://synthetic/db/c5%3A'+i,'PUT',{},'ciphertext'),PendingRequestFailure);
-  assert.equal(pending.length,1);assert.equal(wrapped.usage().chunks,1);
+  assert.equal(pending.length,2);assert.equal(wrapped.usage().chunks,2);
   await assert.rejects(()=>wrapped('https://synthetic/db/control1','GET',{}),PendingRequestFailure);
   await assert.rejects(()=>wrapped('https://synthetic/db/control2','GET',{}),PendingRequestFailure);
   await assert.rejects(()=>wrapped('https://synthetic/db/control3','GET',{}),PendingRequestFailure);
-  assert.deepEqual(wrapped.usage(),{chunks:1,controls:2,bytesHeld:20});
+  assert.deepEqual(wrapped.usage(),{chunks:2,controls:2,bytesHeld:40});
   for(const resolve of pending)resolve({status:200,json:{}});await new Promise(r=>setTimeout(r,0));
   assert.deepEqual(wrapped.usage(),{chunks:0,controls:0,bytesHeld:0});
   await assert.rejects(()=>wrapped('https://synthetic/db/control','PUT',{},'x'.repeat(524289)),/budget/);

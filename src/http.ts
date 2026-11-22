@@ -5,9 +5,13 @@ export class PendingRequestFailure extends Error {}
 export function withTimeout(http:Http,milliseconds=15000):Http {
   const pending=new Set<string>();
   let chunks=0,controls=0,bytesHeld=0,expiredChunks=0,uploads=0;
-  // Uploads stay exclusive. Downloads admit one fixed pair; a timed-out native
-  // request blocks new chunks until it settles, even if another slot is free.
-  const assertChunkAvailable=(download=false)=>{if(expiredChunks||uploads||chunks>=(download?2:1))throw new PendingRequestFailure('Previous attachment request is still pending');};
+  // Each direction admits one fixed pair, but uploads and downloads never mix.
+  // A timed-out native request blocks new chunks until it actually settles.
+  const assertChunkAvailable=(download=false)=>{
+    const downloads=chunks-uploads;
+    if(expiredChunks||(download?uploads>0||downloads>=2:downloads>0||uploads>=2))
+      throw new PendingRequestFailure('Previous attachment request is still pending');
+  };
   const wrapped:Http=async(url,method,headers,body,responseType)=>{
     let key='';
     if(url.includes('/_all_docs')&&typeof body==='string'&&body.length<16384) {
