@@ -166,7 +166,7 @@ export default class BetterSync extends Plugin {
         if(this.unloaded)return;
         const vault=new ObsidianVault(this.app);
         vault.assertStagingSupport();
-        const remote=await EncryptedRemote.connect(this.settings,this.http(),crypto,p=>vault.allowed(p));
+        const remote=await EncryptedRemote.connect(this.settings,this.http(),crypto,p=>vault.isAllowed(p));
         if(this.unloaded)return;
         if(this.state&&this.state.binding!==remote.stateBinding)throw new Error('Existing sync progress cannot be reused with this encrypted vault.');
         const state=this.state??freshState(remote.stateBinding);this.state=state;

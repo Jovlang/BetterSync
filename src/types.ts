@@ -58,6 +58,8 @@ export interface BinaryStaging {
 }
 export interface VaultClient {
   staging?:BinaryStaging;
+  /** Single source of truth for paths owned by this vault's sync scope. */
+  isAllowed(path:string):boolean;
   fileSize?(path: string): Promise<number | null>;
   /** Recover an interrupted binary replacement before inspecting local contents. */
   recoverIncoming?(path:string, expectedHash:string|null, preserve:(content:Content)=>Promise<void>):Promise<void>;

@@ -13,6 +13,7 @@ import {fixture, connection} from './encrypted-wire';
 
 class BinaryVault implements VaultClient {
   files=new Map<string,Content>();reads=0;
+  isAllowed(path:string){return syncPath(path);}
   listFiles(){return [...this.files.keys()];}
   async fileSize(path:string) {const v=this.files.get(path);return v===undefined?null:typeof v==='string'?new TextEncoder().encode(v).length:v.byteLength;}
   async read(path:string){this.reads++;return this.files.get(path)??null;}

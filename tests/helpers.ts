@@ -1,4 +1,4 @@
-import {hash,encodeBinary} from '../src/paths';
+import {hash,encodeBinary,syncPath} from '../src/paths';
 import {freshState,StateStore} from '../src/local-state';
 import {SyncEngine} from '../src/sync-engine';
 import {SyncFailure,type Content,type Remote,type FileDocument,type RemoteChanges,type Sequence,type VaultClient,type LocalSyncState,type SyncStatus} from '../src/types';
@@ -30,6 +30,7 @@ export class MemoryRemote implements Remote {
 export class MemoryVault implements VaultClient {
   files=new Map<string,string>();onChange?:(path:string)=>Promise<void>;
   beforeCAS?:()=>Promise<void>; failPath?:string;
+  isAllowed(path:string){return syncPath(path);}
   listFiles(){return [...this.files.keys()];}
   async read(path:string){return this.files.get(path)??null;}
   async create(path:string,content:Content){if(content instanceof ArrayBuffer)content=encodeBinary(content);if(this.files.has(path)) throw new Error('Exists');this.files.set(path,content);await this.onChange?.(path);}

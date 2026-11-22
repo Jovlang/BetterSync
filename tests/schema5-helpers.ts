@@ -46,8 +46,8 @@ export async function fixture() {
   await new CouchConfiguration(connection,wire.http).createConfiguration(await createConfiguration(key));
   return {code,key,wire,remote:()=>EncryptedRemote.connect(connection,wire.http,key,syncPath)};
 }
-export async function device(remote:EncryptedRemote) {
-  const host=await diskHost();let disk=freshState(remote.stateBinding),engine:SyncEngine,status:SyncStatus='Synced';
+export async function device(remote:EncryptedRemote,configDir='.obsidian') {
+  const host=await diskHost(configDir);let disk=freshState(remote.stateBinding),engine:SyncEngine,status:SyncStatus='Synced';
   let failSave:((state:LocalSyncState)=>boolean)|undefined;const logs:string[]=[],notices:string[]=[];
   const boot=()=>{engine=new SyncEngine(host.vault,remote,new StateStore(structuredClone(disk),async s=>{
     if(failSave?.(s))throw new Error('simulated durable write failure');disk=structuredClone(s);

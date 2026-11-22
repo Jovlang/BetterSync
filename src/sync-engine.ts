@@ -1,4 +1,4 @@
-import {decodeBinary, rawHash, documentId, hashAsync, syncPath, validateContent} from './paths';
+import {decodeBinary, rawHash, documentId, hashAsync, validateContent} from './paths';
 import {preserveConflict} from './conflict-handler';
 import {validateDocument} from './couch-client';
 import {StateStore, PersistenceFailure} from './local-state';
@@ -24,19 +24,20 @@ export class SyncEngine {
       throw new SyncFailure('configuration','Sync progress belongs to a different vault, key or database.');
   }
   private ownsRecord(id:string):boolean {return this.remote.ownsRecord?.(id)??id.startsWith('file:');}
+  private ownsPath(path:string):boolean {return this.vault.isAllowed(path);}
   /** A one-time inventory also recovers edits/deletions whose events were missed while closed. */
   async start():Promise<void> {
     this.stopped = false;
     await this.dropExcludedState();
     await this.transfers.recover();
-    for (const p of [...(await this.vault.listFiles()),...Object.keys(this.store.state.files),...Object.keys(this.store.state.transfers??{}),...Object.keys(this.store.state.outgoing??{})]) if(syncPath(p)) this.dirty.add(p);
+    for (const p of [...(await this.vault.listFiles()),...Object.keys(this.store.state.files),...Object.keys(this.store.state.transfers??{}),...Object.keys(this.store.state.outgoing??{})]) if(this.ownsPath(p)) this.dirty.add(p);
     await this.tick();
   }
   /** Scope reductions leave local files untouched and discard only sync-owned
    * journals/checkpoints that must no longer act on those paths. */
   private async dropExcludedState():Promise<void> {
     const state=this.store.state,maps=[state.files,state.incoming,state.transfers,state.outgoing];let changed=false;
-    for(const map of maps)if(map)for(const path of Object.keys(map))if(!syncPath(path)) {
+    for(const map of maps)if(map)for(const path of Object.keys(map))if(!this.ownsPath(path)) {
       const staged=map===state.incoming?state.incoming[path]?.staged?.id:undefined;
       if(staged)try{await this.vault.staging?.remove(staged);}catch{this.ui.log('excluded staging cleanup deferred');}
       delete map[path];changed=true;
@@ -45,13 +46,13 @@ export class SyncEngine {
   }
   async stop():Promise<void> { this.stopped=true; await this.running;this.remote.release?.(); }
   async changed(path:string):Promise<void> {
-    if (!syncPath(path) || this.stopped) return;
+    if (!this.ownsPath(path) || this.stopped) return;
     // Events enqueue work without concurrent whole-file reads.
     this.dirty.add(path);
   }
   async retry():Promise<void> {
     await this.running;
-    for(const path of await this.transfers.retry())this.dirty.add(path);
+    for(const path of await this.transfers.retry())if(this.ownsPath(path))this.dirty.add(path);
     this.blocked=false;await this.tick();
   }
   tick():Promise<void> {
@@ -64,7 +65,7 @@ export class SyncEngine {
     this.mayPoll=false;
     this.ui.status('Syncing…');
     try {
-      for(const path of await this.vault.scanChanges?.()??[])this.dirty.add(path);
+      for(const path of await this.vault.scanChanges?.()??[])if(this.ownsPath(path))this.dirty.add(path);
       if(!this.store.state.initialized) {
         if(!await this.initialize()) return;
       }
@@ -181,7 +182,7 @@ export class SyncEngine {
         probe=page.last_seq;
         if(this.stopped) return false;
       }
-      const local=(await this.vault.listFiles()).filter(syncPath);
+      const local=(await this.vault.listFiles()).filter(path=>this.ownsPath(path));
       if(local.length && hasRemote) {
         this.blocked=true;this.ui.status('Sync error');
         this.ui.notice('This device and the server both already contain files. Automatic first-time merging is not supported yet.');return false;

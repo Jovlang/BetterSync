@@ -12,7 +12,7 @@ import {freshState, StateStore} from '../src/local-state';
 import {SyncEngine} from '../src/sync-engine';
 import type {LocalSyncState, SyncStatus} from '../src/types';
 
-export async function diskHost() {
+export async function diskHost(configDir='.obsidian') {
   const bundle=await build({entryPoints:['src/vault-client.ts'],bundle:true,write:false,format:'esm',platform:'browser',external:['node:fs/promises'],plugins:[{
     name:'synthetic-host',setup(b){
       b.onResolve({filter:/^obsidian$/},()=>({path:'obsidian',namespace:'mock'}));
@@ -49,7 +49,7 @@ export async function diskHost() {
     await writeFile(target,data,{flag:'wx'});
     if(options?.mtime!==undefined)await utimes(target,new Date(),new Date(options.mtime));
   };
-  const vault=new Host({vault:{adapter,configDir:'.obsidian',getAbstractFileByPath:()=>null,
+  const vault=new Host({vault:{adapter,configDir,getAbstractFileByPath:()=>null,
     create:createFile,createBinary:(p:string,data:ArrayBuffer,options?:{mtime?:number})=>createFile(p,new Uint8Array(data),options)},workspace:{getLeavesOfType:()=>[]}} as unknown as App);
   return {root,vault,adapter,operations,setFailBinaryCreate:(value:boolean)=>{failBinaryCreate=value;},
     seed:async(p:string,bytes:Uint8Array)=>{await mkdir(dirname(join(root,p)),{recursive:true});await writeFile(join(root,p),bytes);},

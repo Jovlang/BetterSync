@@ -43,7 +43,7 @@ export class ObsidianVault implements VaultClient {
     throw new Error('Could not preserve conflict.');
   }
   private async installStaged(path:string,id:string,expected:string|null,digest:string,mtime:number,client:string) {
-    if(!this.allowed(path)||markdown(path)||path.endsWith('/'))throw new Error('Unsupported staged destination.');
+    if(!this.isAllowed(path)||markdown(path)||path.endsWith('/'))throw new Error('Unsupported staged destination.');
     const a=this.app.vault.adapter,backup=this.recoveryPath(path),conflicts:string[]=[];
     await this.parents(path);await this.parents(backup);
     // Recover the captured original before inspecting/accepting the destination.
@@ -69,7 +69,7 @@ export class ObsidianVault implements VaultClient {
     return {matched:true,conflicts};
   }
   private async deleteStaged(path:string,expected:string|null,client:string):Promise<string[]> {
-    if(!this.allowed(path)||markdown(path)||path.endsWith('/'))throw new Error('Unsupported staged deletion.');
+    if(!this.isAllowed(path)||markdown(path)||path.endsWith('/'))throw new Error('Unsupported staged deletion.');
     const a=this.app.vault.adapter,backup=this.recoveryPath(path),conflicts:string[]=[];
     await this.parents(backup);
     // A previous replacement or deletion may have captured edits before termination.
@@ -89,11 +89,11 @@ export class ObsidianVault implements VaultClient {
     return conflicts;
   }
   async fileSize(path:string):Promise<number|null> {
-    if(!this.allowed(path))throw new Error('Unsupported path.');
+    if(!this.isAllowed(path))throw new Error('Unsupported path.');
     const stat=await this.app.vault.adapter.stat(path);
     return stat?.type==='file'?stat.size:null;
   }
-  allowed(path:string):boolean {
+  isAllowed(path:string):boolean {
     const config=(this.app.vault.configDir??'.obsidian').normalize('NFC').toLowerCase().replace(/\/$/,'');
     const target=path.normalize('NFC').toLowerCase().replace(/\/$/,'');
     return syncPath(path) && target!==config && !target.startsWith(config+'/');
@@ -121,18 +121,18 @@ export class ObsidianVault implements VaultClient {
     const result:string[]=[];
     const walk=async(path:string):Promise<void>=>{
       const listing=await this.app.vault.adapter.list(path);
-      for(const file of listing.files) if(this.allowed(file)) result.push(file);
-      for(const folder of listing.folders) if(this.allowed(folder)) {result.push(folder+'/');await walk(folder);}
+      for(const file of listing.files) if(this.isAllowed(file)) result.push(file);
+      for(const folder of listing.folders) if(this.isAllowed(folder)) {result.push(folder+'/');await walk(folder);}
     };
     await walk('');return result;
   }
   async modificationTime(path:string):Promise<number|undefined> {
-    if(!this.allowed(path)) throw new Error('Unsupported path.');
+    if(!this.isAllowed(path)) throw new Error('Unsupported path.');
     const stat=await this.app.vault.adapter.stat(path);
     return stat?.type==='file' ? Math.trunc(stat.mtime) : undefined;
   }
   async read(path:string):Promise<Content|null> {
-    if(!this.allowed(path)) throw new Error('Unsupported path.');
+    if(!this.isAllowed(path)) throw new Error('Unsupported path.');
     const diskPath=path.endsWith('/')?path.slice(0,-1):path;
     const stat=await this.app.vault.adapter.stat(diskPath);
     if(!stat)return null;
@@ -174,7 +174,7 @@ export class ObsidianVault implements VaultClient {
     } finally {if(await adapter.exists(staging))await adapter.remove(staging);}
   }
   async recoverIncoming(path:string,expected:string|null,preserve:(content:Content)=>Promise<void>):Promise<void> {
-    if(!this.allowed(path)) throw new Error('Unsupported path.');
+    if(!this.isAllowed(path)) throw new Error('Unsupported path.');
     if(path.endsWith('/') || markdown(path))return;
     const adapter=this.app.vault.adapter,backup=this.recoveryPath(path);
     if(!await adapter.exists(backup))return;
@@ -189,7 +189,7 @@ export class ObsidianVault implements VaultClient {
     await adapter.remove(backup);
   }
   async create(path:string,content:Content,mtime?:number):Promise<void> {
-    if(!this.allowed(path)) throw new Error('Unsupported path.');
+    if(!this.isAllowed(path)) throw new Error('Unsupported path.');
     validateContent(path,content);
     const target=path.endsWith('/')?path.slice(0,-1):path;
     if(await this.app.vault.adapter.exists(target))throw new Error('Path exists.');
@@ -220,7 +220,7 @@ export class ObsidianVault implements VaultClient {
     }
   }
   async compareAndSet(path:string,expected:string|null,content:Content|null,mtime?:number):Promise<boolean> {
-    if(!this.allowed(path)) throw new Error('Unsupported path.');
+    if(!this.isAllowed(path)) throw new Error('Unsupported path.');
     if(content!==null)validateContent(path,content);
     if(path.endsWith('/') || !markdown(path) || !this.app.vault.getAbstractFileByPath(path)) {
       if(await hashAsync(await this.read(path))!==expected)return false;

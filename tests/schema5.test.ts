@@ -226,14 +226,58 @@ test('schema 5 keeps directories, extensionless files, Canvas, renames and three
   }finally{await a.close();await b.close();await c.close();}
 });
 
-test('schema 5 authenticates and skips dotfile records written by older builds',async()=>{
-  const f=await fixture(),salt=base64url(randomBytes(32)),bytes=new TextEncoder().encode('old hidden data').buffer;
-  const metadata=await prepareMetadata('.legacy/secret',bytes,false,1),record=await sealManifest(f.key,metadata,salt,bytes);
-  const saved={...record,_rev:'1-old'},id=await f.key.documentId(metadata.path);
-  f.wire.records.set(id,saved);f.wire.versions.set(id+'@1-old',structuredClone(saved));f.wire.history.set(id,{id,seq:++f.wire.seq,changes:[{rev:'1-old'}]});
-  assert.equal(validPath(metadata.path),true);assert.equal(syncPath(metadata.path),false);
-  const remote=await f.remote(),page=await remote.getChanges(0);assert.equal(page.results.length,0);assert.equal(page.sourceRows,2);
+test('schema 5 authenticates and skips live and deleted dotfile records written by older builds',async()=>{
+  const f=await fixture(),bytes=new TextEncoder().encode('old hidden data').buffer;
+  const live=await prepareMetadata('.legacy/secret',bytes,false,1),deleted=await prepareMetadata('.deleted',undefined,true,2);
+  for(const [metadata,inline] of [[live,bytes],[deleted,undefined]] as const) {
+    const record=await sealManifest(f.key,metadata,base64url(randomBytes(32)),inline),saved={...record,_rev:'1-old'},id=await f.key.documentId(metadata.path);
+    f.wire.records.set(id,saved);f.wire.versions.set(id+'@1-old',structuredClone(saved));f.wire.history.set(id,{id,seq:++f.wire.seq,changes:[{rev:'1-old'}]});
+    assert.equal(validPath(metadata.path),true);assert.equal(syncPath(metadata.path),false);
+  }
+  const remote=await f.remote(),page=await remote.getChanges(0);assert.equal(page.results.length,0);assert.equal(page.sourceRows,3);
   const d=await device(remote);
   try {await d.host.seed('.env',new TextEncoder().encode('local'));await d.engine.start();assert.equal(d.status,'Synced');assert.equal(d.disk.lastSequence,f.wire.seq);assert.equal(await readFile(join(d.host.root,'.env'),'utf8'),'local');}
   finally{await d.close();}
+});
+
+test('schema 5 startup drops excluded tombstones and interrupted staged downloads without touching local dotfiles',async()=>{
+  const f=await fixture(),d=await device(await f.remote());
+  try {
+    await d.host.seed('.git/config',new TextEncoder().encode('local git config'));
+    await d.host.seed('.aws/credentials',new TextEncoder().encode('local credentials'));
+    const tombstone=await prepareMetadata('.git/',undefined,true,1),tombstoneRecord={...await sealManifest(f.key,tombstone,base64url(randomBytes(32))),_rev:'2-old'};
+    const large=new Uint8Array(CHUNK_BYTES+1).fill(7),hidden=await prepareMetadata('.aws/credentials',large.buffer,false,2);
+    const hiddenRecord={...await sealManifest(f.key,hidden,base64url(randomBytes(32))),_rev:'3-old'},stageId=hidden.version!;
+    await d.host.vault.staging!.reset(stageId);await d.host.vault.staging!.append(stageId,large.slice(0,CHUNK_BYTES).buffer);
+    assert.equal(await d.host.vault.staging!.size(stageId),CHUNK_BYTES);
+    d.disk.initialized=true;
+    d.disk.files['.git/']={rev:'1-base',hash:null};d.disk.files['.aws/credentials']={rev:'1-base',hash:null};
+    d.disk.incoming['.git/']={doc:{_id:tombstoneRecord._id,_rev:tombstoneRecord._rev,schema:3,path:tombstone.path,mtime:tombstone.mtime,deleted:true,size:0,manifest:tombstoneRecord},expected:null};
+    d.disk.incoming['.aws/credentials']={doc:{_id:hiddenRecord._id,_rev:hiddenRecord._rev,schema:3,path:hidden.path,mtime:hidden.mtime,deleted:false,size:hidden.size,manifest:hiddenRecord},expected:null,
+      staged:{id:stageId,next:1,offset:CHUNK_BYTES,prefixHash:createHash('sha256').update(large.subarray(0,CHUNK_BYTES)).digest('hex')}};
+    d.disk.transfers={'.aws/credentials':{direction:'download',stage:'chunk-network',size:hidden.size,active:true,failures:0,paused:false}};
+    await d.restart();
+    for(const path of ['.git/','.aws/credentials']) {
+      assert.equal(d.disk.files[path],undefined);assert.equal(d.disk.incoming[path],undefined);assert.equal(d.disk.transfers?.[path],undefined);
+    }
+    assert.equal(await d.host.vault.staging!.size(stageId),null);assert.equal(d.status,'Synced');
+    assert.equal(await readFile(join(d.host.root,'.git/config'),'utf8'),'local git config');
+    assert.equal(await readFile(join(d.host.root,'.aws/credentials'),'utf8'),'local credentials');
+  }finally{await d.close();}
+});
+
+test('schema 5 startup uses custom config-dir scope for state cleanup and dirty reconstruction',async()=>{
+  const f=await fixture(),d=await device(await f.remote(),'Settings');
+  try {
+    await d.host.seed('Settings/legacy.md',new TextEncoder().encode('local settings'));
+    const metadata=await prepareMetadata('Settings/legacy.md',new TextEncoder().encode('remote settings').buffer,false,1);
+    const record={...await sealManifest(f.key,metadata,base64url(randomBytes(32)),new TextEncoder().encode('remote settings').buffer),_rev:'2-old'};
+    d.disk.initialized=true;d.disk.files[metadata.path]={rev:'1-base',hash:null};
+    d.disk.incoming[metadata.path]={doc:{_id:record._id,_rev:record._rev,schema:3,path:metadata.path,mtime:metadata.mtime,deleted:false,size:metadata.size,manifest:record},expected:null};
+    d.disk.transfers={[metadata.path]:{direction:'download',stage:'local-write',size:metadata.size,active:true,failures:0,paused:false}};
+    assert.equal(d.host.vault.isAllowed(metadata.path),false);await d.restart();
+    assert.equal(d.disk.files[metadata.path],undefined);assert.equal(d.disk.incoming[metadata.path],undefined);assert.equal(d.disk.transfers?.[metadata.path],undefined);
+    assert.equal(d.status,'Synced');assert.equal(await readFile(join(d.host.root,metadata.path),'utf8'),'local settings');
+    assert.equal(f.wire.records.has(await f.key.documentId(metadata.path)),false);
+  }finally{await d.close();}
 });
