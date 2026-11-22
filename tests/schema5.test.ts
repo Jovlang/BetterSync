@@ -8,7 +8,7 @@ import {EncryptedCouch} from '../src/encrypted-couch';
 import {EncryptedRemote} from '../src/encrypted-remote';
 import {prepareMetadata,sealManifest,decryptMetadata,EncryptedChunk,openChunk,CHUNK_BYTES,INLINE_FILE_BYTES,MAX_CHUNK_DOCUMENT_BYTES} from '../src/encrypted-protocol';
 import {base64url,randomBytes,frame,CRYPTO_DOMAIN} from '../src/crypto';
-import {syncPath,MAX_FILE_BYTES} from '../src/paths';
+import {syncPath,validPath,MAX_FILE_BYTES} from '../src/paths';
 import {authenticateConfiguration} from '../src/encryption-setup';
 import {PersistenceFailure} from '../src/local-state';
 import {createConfiguration as oldConfiguration,importRecoveryCode as oldKey,generateRecoveryCode as oldCode} from '../src/legacy/encryption-setup';
@@ -210,18 +210,30 @@ for(const deletion of [false,true])test(`large local binary uses disk preservati
   }finally{await a.close();await b.close();await c.close();}
 });
 
-test('schema 5 keeps directories, hidden files, Canvas, renames and three-client Markdown conflicts',async()=>{
+test('schema 5 keeps directories, extensionless files, Canvas, renames and three-client Markdown conflicts',async()=>{
   const f=await fixture(),a=await device(await f.remote()),b=await device(await f.remote()),c=await device(await f.remote());
   try {
     for(const d of [a,b,c])await d.engine.start();
     await mkdir(join(a.host.root,'empty'));await a.engine.changed('empty/');
-    for(const [path,text]of [['.hidden','hidden'],['map.canvas','{"nodes":[]}'],['note.md','original']]) {await a.host.seed(path!,new TextEncoder().encode(text));await a.engine.changed(path!);}
+    for(const [path,text]of [['plain','extensionless'],['map.canvas','{"nodes":[]}'],['note.md','original']]) {await a.host.seed(path!,new TextEncoder().encode(text));await a.engine.changed(path!);}
     await settle(a,b,c);
     for(const d of [a,b,c])assert.ok((await d.host.vault.listFiles()).includes('empty/'));
     await a.host.seed('note.md',new TextEncoder().encode('server'));await a.engine.changed('note.md');await settle(a,c);
     await b.host.seed('note.md',new TextEncoder().encode('offline'));await b.engine.changed('note.md');await settle(b,a,c);
     for(const d of [a,b,c]) {assert.equal(await readFile(join(d.host.root,'note.md'),'utf8'),'server');const p=(await d.host.vault.listFiles()).find(p=>p.includes('.sync-conflict-'));assert.ok(p);assert.equal(await readFile(join(d.host.root,p),'utf8'),'offline');}
-    await a.host.adapter.rename('.hidden','.renamed');await a.engine.changed('.hidden');await a.engine.changed('.renamed');await settle(a,b,c);
-    for(const d of [a,b,c]){assert.equal(await d.host.vault.read('.hidden'),null);assert.equal(await readFile(join(d.host.root,'.renamed'),'utf8'),'hidden');}
+    await a.host.adapter.rename('plain','renamed');await a.engine.changed('plain');await a.engine.changed('renamed');await settle(a,b,c);
+    for(const d of [a,b,c]){assert.equal(await d.host.vault.read('plain'),null);assert.equal(await readFile(join(d.host.root,'renamed'),'utf8'),'extensionless');}
   }finally{await a.close();await b.close();await c.close();}
+});
+
+test('schema 5 authenticates and skips dotfile records written by older builds',async()=>{
+  const f=await fixture(),salt=base64url(randomBytes(32)),bytes=new TextEncoder().encode('old hidden data').buffer;
+  const metadata=await prepareMetadata('.legacy/secret',bytes,false,1),record=await sealManifest(f.key,metadata,salt,bytes);
+  const saved={...record,_rev:'1-old'},id=await f.key.documentId(metadata.path);
+  f.wire.records.set(id,saved);f.wire.versions.set(id+'@1-old',structuredClone(saved));f.wire.history.set(id,{id,seq:++f.wire.seq,changes:[{rev:'1-old'}]});
+  assert.equal(validPath(metadata.path),true);assert.equal(syncPath(metadata.path),false);
+  const remote=await f.remote(),page=await remote.getChanges(0);assert.equal(page.results.length,0);assert.equal(page.sourceRows,2);
+  const d=await device(remote);
+  try {await d.host.seed('.env',new TextEncoder().encode('local'));await d.engine.start();assert.equal(d.status,'Synced');assert.equal(d.disk.lastSequence,f.wire.seq);assert.equal(await readFile(join(d.host.root,'.env'),'utf8'),'local');}
+  finally{await d.close();}
 });

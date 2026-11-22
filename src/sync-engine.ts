@@ -27,9 +27,21 @@ export class SyncEngine {
   /** A one-time inventory also recovers edits/deletions whose events were missed while closed. */
   async start():Promise<void> {
     this.stopped = false;
+    await this.dropExcludedState();
     await this.transfers.recover();
     for (const p of [...(await this.vault.listFiles()),...Object.keys(this.store.state.files),...Object.keys(this.store.state.transfers??{}),...Object.keys(this.store.state.outgoing??{})]) if(syncPath(p)) this.dirty.add(p);
     await this.tick();
+  }
+  /** Scope reductions leave local files untouched and discard only sync-owned
+   * journals/checkpoints that must no longer act on those paths. */
+  private async dropExcludedState():Promise<void> {
+    const state=this.store.state,maps=[state.files,state.incoming,state.transfers,state.outgoing];let changed=false;
+    for(const map of maps)if(map)for(const path of Object.keys(map))if(!syncPath(path)) {
+      const staged=map===state.incoming?state.incoming[path]?.staged?.id:undefined;
+      if(staged)try{await this.vault.staging?.remove(staged);}catch{this.ui.log('excluded staging cleanup deferred');}
+      delete map[path];changed=true;
+    }
+    if(changed)await this.store.save();
   }
   async stop():Promise<void> { this.stopped=true; await this.running;this.remote.release?.(); }
   async changed(path:string):Promise<void> {

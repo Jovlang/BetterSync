@@ -157,7 +157,7 @@ Each sync implementation change runs `npm run verify`. Run `npm run test:integra
 | Randomness | Concurrent three-client writes; crash/retry and lost responses; fresh derivation salt and nonce for changed encryption attempts; fail closed on random-source errors |
 | Parser safety | Unsupported schema, plaintext injection, malformed/oversized metadata, unexpected attachments, forged lengths, excluded/traversal paths, Unicode/case collisions, `__proto__`/`constructor` paths |
 | Initialization | Racing creators, wrong recovery code, lost configuration response, secret-store failure, crash after each setup step, missing/changed configuration, both-populated refusal, cancel and empty/empty behavior |
-| Sync behavior | Three clients: text, Canvas, binaries, hidden/empty files and directories, rename, delete/edit conflicts, rapid editing, offline updates, stale clients and file/directory replacement |
+| Sync behavior | Three clients: text, Canvas, binaries, empty files and directories, dotfile exclusion, rename, delete/edit conflicts, rapid editing, offline updates, stale clients and file/directory replacement |
 | Crash recovery | Kill before/after journal save, HTTP acceptance, attachment authentication, conflict preservation, staging/copy/trash and baseline save; no loss, stale resurrection or duplicate conflict explosion |
 | Corrupt records | No filesystem effects, no baseline acceptance, no overwrite of quarantined identity, durable checkpoint behavior, unrelated progress, valid replacement/retry and restart recovery |
 | CouchDB wire | Real multipart ciphertext, metadata/attachment atomicity, 409, timed-out accepted PUT, revision-specific attachment fetch, compaction, deletion markers, fresh-client restore and pagination |

@@ -1,5 +1,5 @@
 /** Fixed draft E2EE primitives shared by setup and transport. */
-import {syncPath} from './paths';
+import {validPath} from './paths';
 
 export class EncryptionError extends Error {
   constructor() { super('Could not authenticate encrypted sync data.'); }
@@ -69,7 +69,7 @@ export class VaultCrypto {
   }
 
   async documentId(path: string): Promise<string> {
-    if (!syncPath(path) || new TextDecoder('utf-8', {fatal: true}).decode(encoder.encode(path)) !== path)
+    if (!validPath(path) || new TextDecoder('utf-8', {fatal: true}).decode(encoder.encode(path)) !== path)
       throw new EncryptionError();
     return 'f5:' + base64url(new Uint8Array(await crypto.subtle.sign('HMAC', this.ids, frame(CRYPTO_DOMAIN, 'path', path))));
   }

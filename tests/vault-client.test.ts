@@ -6,7 +6,7 @@ import {fileURLToPath} from 'node:url';
 import type {App} from 'obsidian';
 import type {ObsidianVault as VaultAdapter} from '../src/vault-client';
 
-test('portable adapter inventories hidden files, preserves bytes, defers nonempty directory deletes and skips oversized reads',async()=>{
+test('portable adapter excludes dotfiles, preserves bytes, defers nonempty directory deletes and skips oversized reads',async()=>{
   const bundle=await build({entryPoints:['src/vault-client.ts'],bundle:true,write:false,format:'esm',platform:'browser',external:['node:fs/promises'],plugins:[{
     name:'mock-obsidian',setup(b){
       b.onResolve({filter:/^obsidian$/},()=>({path:'obsidian',namespace:'mock'}));
@@ -14,7 +14,7 @@ test('portable adapter inventories hidden files, preserves bytes, defers nonempt
     }
   }]});
   const {ObsidianVault}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0]!.text).toString('base64'));
-  const entries=new Map<string,ArrayBuffer|null>([['',null],['.obsidian',null],['.obsidian/secret',new ArrayBuffer(1)],['.hidden',null],['.hidden/bytes',Uint8Array.from([0,255]).buffer]]);
+  const entries=new Map<string,ArrayBuffer|null>([['',null],['.obsidian',null],['.obsidian/secret',new ArrayBuffer(1)],['.hidden',null],['.hidden/bytes',new ArrayBuffer(1)],['visible',null],['visible/bytes',Uint8Array.from([0,255]).buffer],['visible/.secret',new ArrayBuffer(1)]]);
   let binaryReads=0;
   const adapter={
     stat:async(p:string)=>entries.has(p)?{type:entries.get(p)===null?'folder':'file',size:p==='huge.bin'?MAX_FILE_BYTES+1:entries.get(p)?.byteLength??0,mtime:1}:null,
@@ -29,8 +29,9 @@ test('portable adapter inventories hidden files, preserves bytes, defers nonempt
     trashLocal:async(p:string)=>{entries.delete(p);}
   };
   const vault=new ObsidianVault({vault:{adapter,getAbstractFileByPath:()=>null}});
-  assert.deepEqual(await vault.listFiles(),['.hidden/','.hidden/bytes']);
-  assert.deepEqual(new Uint8Array(await vault.read('.hidden/bytes')),Uint8Array.from([0,255]));
+  assert.deepEqual(await vault.listFiles(),['visible/','visible/bytes']);
+  assert.deepEqual(new Uint8Array(await vault.read('visible/bytes')),Uint8Array.from([0,255]));
+  await assert.rejects(()=>vault.read('.hidden/bytes'),/Unsupported path/);
   await vault.create('empty/','directory');assert.equal(await vault.read('empty/'),'directory');
   await vault.create('empty/attachment.bin','AQID');
   assert.deepEqual(new Uint8Array(entries.get('empty/attachment.bin')!),Uint8Array.from([1,2,3]));
@@ -40,8 +41,8 @@ test('portable adapter inventories hidden files, preserves bytes, defers nonempt
   assert.equal(await vault.compareAndSet('empty/',hash('directory'),null),true);
   entries.set('huge.bin',new ArrayBuffer(0));const reads=binaryReads;
   await assert.rejects(()=>vault.read('huge.bin'),/200 MiB/);assert.equal(binaryReads,reads);
-  await vault.scanChanges();entries.delete('.hidden/bytes');
-  assert.deepEqual(await vault.scanChanges(),['.hidden/bytes']);
+  await vault.scanChanges();entries.delete('visible/bytes');
+  assert.deepEqual(await vault.scanChanges(),['visible/bytes']);
 });
 
 // Exercise the actual adapter with only the Obsidian host classes replaced.
@@ -110,15 +111,15 @@ for(const deletion of [false,true])for(const pendingFirst of [false,true])test(
   assert.equal(calls,0);
 });
 
-test('inventory skips custom configuration subtrees but retains similarly named folders',async()=>{
+test('inventory skips dot-directories but retains similarly named non-dot folders',async()=>{
   const visited:string[]=[];
   const adapter={list:async(path:string)=>{
     visited.push(path);
-    if(path==='')return {files:['note.md'],folders:['.private','.private-notes']};
-    if(path==='.private-notes')return {files:['.private-notes/note.md'],folders:[]};
+    if(path==='')return {files:['note.md'],folders:['.private','private-notes']};
+    if(path==='private-notes')return {files:['private-notes/note.md'],folders:[]};
     throw new Error('Configuration folder traversed');
   }};
   const vault=new host.ObsidianVault({vault:{configDir:'.private',adapter}} as unknown as App);
-  assert.deepEqual(await vault.listFiles(),['note.md','.private-notes/','.private-notes/note.md']);
-  assert.deepEqual(visited,['','.private-notes']);
+  assert.deepEqual(await vault.listFiles(),['note.md','private-notes/','private-notes/note.md']);
+  assert.deepEqual(visited,['','private-notes']);
 });

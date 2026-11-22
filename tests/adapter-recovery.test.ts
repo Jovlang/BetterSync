@@ -159,9 +159,9 @@ for(const moment of ['before-move','before-install','after-move-crash','after-in
   }
 });
 
-test('hidden Markdown checks the current contents inside atomic adapter.process',async()=>{
+test('unindexed Markdown checks the current contents inside atomic adapter.process',async()=>{
   const {a,b,c}=await clients();
-  const path='.hidden.md';
+  const path='unindexed.md';
   a.fs.edit(path,[65]);await settle(a,b,c);
   a.fs.edit(path,[66]);await settle(a,c);
   b.fs.beforeProcess=()=>b.fs.edit(path,[67]);

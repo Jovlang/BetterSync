@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {encodeBinary,decodeBinary,syncPath,validateContent,MAX_FILE_BYTES} from '../src/paths';
+import {encodeBinary,decodeBinary,syncPath,validPath,validateContent,MAX_FILE_BYTES} from '../src/paths';
 import {three,settle} from './helpers';
 
 test('binary encoding preserves every byte and chunk boundaries',()=>{
@@ -12,16 +12,21 @@ test('binary encoding preserves every byte and chunk boundaries',()=>{
   assert.equal(MAX_FILE_BYTES,209715200);
   for(const value of ['a','!!!!','AA=A'])assert.throws(()=>validateContent('file.bin',value));
   assert.throws(()=>validateContent('empty/',''));
-  assert.equal(syncPath('.hidden/config'),true);
+  for(const path of ['.env','.hidden/config','folder/.secret','folder/.cache/'])assert.equal(syncPath(path),false,path);
+  assert.equal(validPath('.hidden/config'),true);
+  assert.equal(syncPath('folder/file.name'),true);
   assert.equal(syncPath('folder/.obsidian/config'),false);
 });
 
-test('three clients sync binary, Canvas, hidden files and empty directories through offline restart',async()=>{
+test('three clients sync binary, Canvas, extensionless files and empty directories while dotfiles stay local',async()=>{
   const {a,b,c}=await three();
   const content=encodeBinary(Uint8Array.from([0,255,128,13,10]).buffer);
-  for(const path of ['image.png','board.canvas','.hidden/config','LICENSE'])await a.vault.edit(path,content);
+  for(const path of ['image.png','board.canvas','LICENSE'])await a.vault.edit(path,content);
+  await a.vault.edit('.hidden/config',content);await a.vault.edit('folder/.env',content);
   await a.vault.edit('empty/','directory');await settle(a,b,c);
   for(const d of [a,b,c]) {assert.equal(await d.vault.read('image.png'),content);assert.equal(await d.vault.read('empty/'),'directory');}
+  assert.equal(await a.vault.read('.hidden/config'),content);assert.equal(await a.vault.read('folder/.env'),content);
+  for(const d of [b,c]) {assert.equal(await d.vault.read('.hidden/config'),null);assert.equal(await d.vault.read('folder/.env'),null);}
   const revised=encodeBinary(Uint8Array.from([1,2,3]).buffer);
   await a.vault.edit('image.png',revised);await settle(a,c);
   await b.vault.edit('image.png',encodeBinary(Uint8Array.from([9,8,7]).buffer));await b.restart();await settle(a,b,c);

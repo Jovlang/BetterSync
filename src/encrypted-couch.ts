@@ -8,6 +8,7 @@ import {EncryptedChunk,openChunk,validateEncryptedRecord,decryptMetadata,revisio
 import {SyncFailure,type Sequence} from './types';
 import {PendingTransferFailure} from './types';
 import {PendingRequestFailure} from './http';
+import {validPath} from './paths';
 export class EncryptedCouch {
   private transport:CouchHttp;
   private constructor(connection:Connection,private http:Http,readonly crypto:VaultCrypto,readonly allowed:(path:string)=>boolean) {this.transport=new CouchHttp(connection,http);}
@@ -31,14 +32,15 @@ export class EncryptedCouch {
   }
   async metadata(value:unknown) {
     const record=validateEncryptedRecord(value);if(!record._rev)invalid();
-    return {record,metadata:await decryptMetadata(this.crypto,record,this.allowed)};
+    return {record,metadata:await decryptMetadata(this.crypto,record,validPath)};
   }
   async get(path:string) {
     if(!this.allowed(path))invalid();const raw=await this.raw(await this.crypto.documentId(path));
-    return raw===null?null:(await this.metadata(raw)).record;
+    if(raw===null)return null;const parsed=await this.metadata(raw);
+    if(!this.allowed(parsed.metadata.path))invalid();return parsed.record;
   }
   async putManifest(value:EncryptedRecord,expected?:string):Promise<EncryptedRecord> {
-    const record=validateEncryptedRecord(value);await decryptMetadata(this.crypto,record,this.allowed);
+    const record=validateEncryptedRecord(value);await decryptMetadata(this.crypto,record,path=>validPath(path)&&this.allowed(path));
     if(record._rev!==undefined||(expected!==undefined&&!revision(expected)))invalid();
     const r=object(await this.transport.request('/'+encodeURIComponent(record._id),'PUT',{...record,...(expected?{_rev:expected}:{})}));
     if(r.ok!==true||r.id!==record._id||!revision(r.rev))invalid();return {...record,_rev:r.rev};

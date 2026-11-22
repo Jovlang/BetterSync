@@ -1,6 +1,6 @@
 /** Schema 5: authenticated manifests and independently authenticated immutable chunks. */
 import {VaultCrypto, EncryptionError, CRYPTO_DOMAIN, base64url, unbase64url, base64urlLength, randomBytes} from './crypto';
-import {MAX_FILE_BYTES, rawHashAsync, syncPath} from './paths';
+import {MAX_FILE_BYTES, rawHashAsync, validPath} from './paths';
 export const INLINE_FILE_BYTES=64*1024, CHUNK_BYTES=256*1024, MAX_CHUNKS=MAX_FILE_BYTES/CHUNK_BYTES;
 export const MAX_METADATA_BYTES=64*1024, MAX_CHUNK_DOCUMENT_BYTES=384*1024;
 export interface LogicalMetadata {
@@ -32,7 +32,7 @@ export function chunkId(value:unknown):value is string {return typeof value==='s
 export function validateMetadata(value:unknown):LogicalMetadata {
   if(value&&typeof value==='object'&&validatedMetadata.has(value))return value as LogicalMetadata;
   const d=object(value);exact(d,['path','kind','deleted','mtime','size','hash','version','chunks','contentNonce']);
-  if(typeof d.path!=='string'||!syncPath(d.path)||encoder.encode(d.path).length>4096||decoder.decode(encoder.encode(d.path))!==d.path
+  if(typeof d.path!=='string'||!validPath(d.path)||encoder.encode(d.path).length>4096||decoder.decode(encoder.encode(d.path))!==d.path
     ||!['file','directory'].includes(d.kind as string)||(d.kind==='directory')!==d.path.endsWith('/')||typeof d.deleted!=='boolean'
     ||!Number.isSafeInteger(d.mtime)||(d.mtime as number)<0||!Number.isSafeInteger(d.size)||(d.size as number)<0||(d.size as number)>MAX_FILE_BYTES
     ||!Array.isArray(d.chunks)||d.chunks.length>MAX_CHUNKS)invalid();

@@ -28,10 +28,18 @@ export function markdown(path: string): boolean {
   return syncPath(path) && path.endsWith('.md');
 }
 export const MAX_FILE_BYTES = 200 * 1024 * 1024;
-export function syncPath(path:string):boolean {
+/** Structurally safe vault path. This remains broader than the current sync
+ * scope so authenticated records written by older builds can still be
+ * recognized and ignored without being treated as corrupt. */
+export function validPath(path:string):boolean {
   if(path.endsWith('/')) path=path.slice(0,-1);
   return !!path && !/[\\\u0000-\u001f:]/.test(path)
-    && path.split('/').every(p=>!!p && p!=='.' && p!=='..' && p.toLowerCase()!=='.obsidian' && p.toLowerCase()!=='.trash');
+    && path.split('/').every(p=>!!p && p!=='.' && p!=='..');
+}
+export function syncPath(path:string):boolean {
+  if(!validPath(path))return false;
+  if(path.endsWith('/'))path=path.slice(0,-1);
+  return path.split('/').every(part=>!part.startsWith('.'));
 }
 export function encodeBinary(buffer:ArrayBuffer):string {
   const bytes=new Uint8Array(buffer);let result='';

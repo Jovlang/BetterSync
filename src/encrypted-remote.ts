@@ -35,9 +35,16 @@ export class EncryptedRemote implements Remote {
   ownsRecord(id:string) {return id.startsWith('f5:');}
   identity(path:string) {return this.crypto.documentId(path);}
   async testConnection() {await this.wire.changes(0);}
+  private document(record:import('./encrypted-protocol').EncryptedRecord,m:LogicalMetadata):FileDocument {
+    return {_id:record._id,_rev:record._rev,schema:3,path:m.path,mtime:m.mtime,deleted:m.deleted,size:m.size,manifest:record};
+  }
   private async logical(value:unknown):Promise<FileDocument> {
     const {record,metadata:m}=await this.wire.metadata(value);
-    return {_id:record._id,_rev:record._rev,schema:3,path:m.path,mtime:m.mtime,deleted:m.deleted,size:m.size,manifest:record};
+    if(!this.wire.allowed(m.path))invalid();return this.document(record,m);
+  }
+  private async changedDocument(value:unknown):Promise<FileDocument|null> {
+    const {record,metadata:m}=await this.wire.metadata(value);
+    return this.wire.allowed(m.path)?this.document(record,m):null;
   }
   async validateIncoming(value:unknown):Promise<FileDocument> {
     if(!value||typeof value!=='object')invalid();const supplied=value as FileDocument;
@@ -55,7 +62,10 @@ export class EncryptedRemote implements Remote {
   }
   async getChanges(since:Sequence) {
     const page=await this.wire.changes(since),results=[];
-    for(const row of page.results)results.push({seq:page.lastSequence,id:row.id,...('record' in row?{doc:await this.logical(row.record)}:{})});
+    for(const row of page.results) {
+      if(!('record' in row)){results.push({seq:page.lastSequence,id:row.id});continue;}
+      const doc=await this.changedDocument(row.record);if(doc)results.push({seq:page.lastSequence,id:row.id,doc});
+    }
     return {results,last_seq:page.lastSequence,sourceRows:page.sourceRows};
   }
   private async validateOutgoing(path:string,op:Outgoing) {

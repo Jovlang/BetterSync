@@ -126,11 +126,22 @@ test('paged bootstrap handles more than a thousand Markdown files',async()=>{
   const {a,b,c}=await three();for(let i=0;i<1050;i++)await a.vault.edit(`folder/${i}.md`,`note ${i}`);
   await settle(a,b,c);assert.equal(b.vault.files.size,1050);assert.equal(c.vault.files.size,1050);
 });
-test('internal and traversal paths are excluded',async()=>{
-  const {a,remote}=await three();for(const p of ['.obsidian/secret.md','../outside.md','a//b.md','/absolute.md','a/./b.md']){assert.equal(markdown(p),false);await a.vault.edit(p,'excluded');}
+test('dotfiles, internal and traversal paths are excluded',async()=>{
+  const {a,remote}=await three();for(const p of ['.env','.folder/note.md','folder/.secret.md','.obsidian/secret.md','../outside.md','a//b.md','/absolute.md','a/./b.md']){assert.equal(markdown(p),false);await a.vault.edit(p,'excluded');}
   await a.tick();assert.equal(remote.seq,0);assert.equal(markdown('Norsk/Æ ø å.md'),true);
   assert.equal(documentId('Norsk/Æ ø å.md'),'file:'+Buffer.from('Norsk/Æ ø å.md').toString('base64url'));
   assert.notEqual(hash(''),hash(null));
+});
+test('startup drops obsolete dotfile sync state without deleting the local file',async()=>{
+  const {a,remote}=await three();const path='.env';
+  a.vault.files.set(path,'local secret');
+  a.disk.files[path]={rev:'1-old',hash:hash('old')!};
+  a.disk.incoming[path]={doc:{_id:documentId(path),_rev:'2-old',schema:2,path,content:'remote',mtime:1,deleted:false},expected:hash('old')};
+  a.disk.transfers={[path]:{direction:'download',stage:'local-write',active:true,failures:0,paused:false}};
+  a.disk.outgoing={[path]:{} as never};
+  await a.restart();
+  assert.equal(await a.vault.read(path),'local secret');assert.equal(remote.seq,0);
+  for(const map of [a.disk.files,a.disk.incoming,a.disk.transfers,a.disk.outgoing])assert.equal(map?.[path],undefined);
 });
 test('all three simultaneously creating the same path retain all three contents',async()=>{
   const {a,b,c}=await three();await a.vault.edit('same.md','A');await b.vault.edit('same.md','B');await c.vault.edit('same.md','C');

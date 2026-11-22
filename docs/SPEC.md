@@ -8,9 +8,10 @@ Three or more independent Obsidian installations synchronize the same vault thro
 
 ## Included
 
-- Regular files, binary attachments, hidden files and explicit directories, including empty ones: create, modify, delete and rename.
+- Regular non-dotfiles, binary attachments and explicit non-dot directories, including empty ones: create, modify, delete and rename.
 - Fixed 200 MiB per-file limit; oversized files remain local and report an error.
 - Scope expanded at user request on 2 November 2026.
+- Dotfiles and dot-directories excluded at user request on 22 November 2026.
 - Unicode, Norwegian characters, spaces and nested directories.
 - Three active clients; additional clients require no new architecture.
 - Persistent identity, baseline, checkpoint and interrupted-operation recovery.
@@ -22,7 +23,7 @@ Three or more independent Obsidian installations synchronize the same vault thro
 
 ## Excluded
 
-The active Obsidian configuration folder, `.obsidian`, local recovery trash (`.trash`), settings, plugins, themes, workspace state, P2P, WebRTC, S3, alternate backends, device registries, revision-selection UI, automatic text merging, version-history UI, compression, selective sync, profiles, compatibility modes and LiveSync migration. Internal fixed encrypted chunks were authorized on 7 November 2026 to fix large-file memory use; no chunk settings or second sync model are exposed.
+All dotfiles and dot-directories at every depth, the active Obsidian configuration folder, local recovery trash (`.trash`), settings, plugins, themes, workspace state, P2P, WebRTC, S3, alternate backends, device registries, revision-selection UI, automatic text merging, version-history UI, compression, selective sync, profiles, compatibility modes and LiveSync migration. Internal fixed encrypted chunks were authorized on 7 November 2026 to fix large-file memory use; no chunk settings or second sync model are exposed.
 
 ## Safety rules
 
@@ -48,7 +49,7 @@ All ten scenarios in `ACCEPTANCE.md` must pass on three **real** Obsidian client
 
 ## Small implementation decisions
 
-- Hidden paths synchronize through the portable adapter. The active configuration folder, `.obsidian` and local recovery `.trash` remain excluded. Filesystem inventory polls detect changes not indexed by Obsidian.
+- A path is excluded when any component starts with `.`. Older authenticated dotfile records are ignored, and obsolete local sync journals for those paths are discarded without deleting the local files. The active configuration folder also remains excluded when it has a custom non-dot name.
 - Renames are a new-path creation and old-path deletion; there is no identity-independent rename model.
 - Conflict names use a short installation ID plus content digest instead of a device name and clock timestamp. This avoids same-minute collisions and duplicate copies after crashes.
 - A local deletion against a newer remote edit preserves the remote contents and reports a conflict; no artificial empty conflict note is created.
