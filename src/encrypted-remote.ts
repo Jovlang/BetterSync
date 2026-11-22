@@ -141,8 +141,9 @@ export class EncryptedRemote implements Remote {
               try {await this.timed('uploadRequest',()=>this.wire.verifyChunk(result.value.context,result.value.expected));}
               catch(error) {if(!failed)failure=error;failed=true;contiguous=false;continue;}
             }
-            this.diagnostics.uploadedChunks++;
-            if(contiguous)op.next++;
+            // Count durable contiguous progress, not an out-of-order success
+            // that will be authenticated again while closing the gap on retry.
+            if(contiguous){op.next++;this.diagnostics.uploadedChunks++;}
             ctx.log(`transfer upload stage=chunk-confirmed bytes=${op.metadata.size} chunk=${op.next}/${op.metadata.chunks.length}`);
           }
           if(failed) {
