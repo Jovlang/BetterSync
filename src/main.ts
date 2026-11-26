@@ -13,6 +13,8 @@ import {ObsidianSecrets} from './obsidian-secrets';
 import {CouchConfiguration} from './couch-configuration';
 import {EncryptedRemote} from './encrypted-remote';
 import {storeCredential} from './credential-storage';
+import {SyncActivity, activityFailure} from './sync-activity';
+import {SyncActivityModal} from './sync-activity-modal';
 interface Saved {settings:Settings; state?:LocalSyncState; encryptionSetup?:SetupIntent}
 export default class BetterSync extends Plugin {
   settings:Settings={...defaults};
@@ -23,6 +25,9 @@ export default class BetterSync extends Plugin {
   private engine?:SyncEngine;
   private settingsTab!:BetterSyncSettings;
   private statusEl!:HTMLElement;
+  private statusButton!:HTMLButtonElement;
+  private activity=new SyncActivity();
+  private activityModal?:SyncActivityModal;
   private timer?:number;
   private writes:Promise<void>=Promise.resolve();
   private config:Promise<void>=Promise.resolve();
@@ -34,6 +39,11 @@ export default class BetterSync extends Plugin {
     this.encryptionSetup=saved?.encryptionSetup;
     this.setupStorage=new PersistentSetupStorage(this.encryptionSetup??null,intent=>this.persist(intent));
     this.statusEl=this.addStatusBarItem();this.settingsTab=new BetterSyncSettings(this.app,this);this.addSettingTab(this.settingsTab);
+    this.statusButton=this.statusEl.createEl('button',{cls:'clickable-icon'});
+    this.statusButton.setAttribute('aria-label','Open BetterSync activity');
+    this.setStatus(this.settings.enabled?'Syncing…':'Synced');
+    this.registerDomEvent(this.statusButton,'click',()=>this.showActivity());
+    this.addCommand({id:'sync-activity',name:'Show sync activity',callback:()=>this.showActivity()});
     this.addCommand({id:'retry-sync',name:'Retry sync',callback:()=>void this.retry()});
     const change=(path:string)=>{void this.engine?.changed(path).catch(()=>this.setStatus('Sync error'));};
     const entry=(file:{path:string})=>file.path+(file instanceof TFolder?'/':'');
@@ -55,7 +65,16 @@ export default class BetterSync extends Plugin {
     this.app.workspace.onLayoutReady(()=>{if(!this.unloaded) void this.configure(this.settings);});
   }
   private setStatus(status:SyncStatus):void {
-    this.status=status;this.statusEl.setText(this.settings.enabled?`BetterSync: ${status}`:'');this.settingsTab.showStatus(status);
+    this.status=status;this.statusButton.setText(`BetterSync: ${status}`);
+    this.statusEl.hidden=!this.settings.enabled;this.settingsTab.showStatus(status);
+  }
+  showActivity():void {
+    this.activityModal?.close();
+    this.activityModal=new SyncActivityModal(this.app,this.activity,()=>this.settings.enabled?this.status:'Sync is disabled.',()=>this.retry());
+    this.activityModal.open();
+  }
+  private setupIssue(failure?:string):void {
+    this.activity.accept({type:'issue',scope:'setup',failure});
   }
   private persist(setup?:SetupIntent):Promise<void> {
     const snapshot=JSON.parse(JSON.stringify({settings:this.settings,state:this.state})) as Saved;
@@ -142,7 +161,7 @@ export default class BetterSync extends Plugin {
           if(password===null)throw new Error();
           settings.password=password;
         }
-      }catch{this.setStatus('Sync error');new Notice('Could not access the database password. Check Obsidian secret storage or enter the password again.');return;}
+      }catch{this.setStatus('Sync error');this.setupIssue('Could not access the database password. Check Obsidian secret storage.');new Notice('Could not access the database password. Check Obsidian secret storage or enter the password again.');return;}
       // A client baseline must never be reused against a different database.
       const binding=hash(settings.url.replace(/\/$/,'')+'\n'+settings.database)!;
       if(this.encryptionSetup && this.encryptionSetup.binding!==binding) {
@@ -158,7 +177,7 @@ export default class BetterSync extends Plugin {
       if(!settings.enabled) {this.setStatus('Synced');return;}
       // Encrypted setup is mandatory; there is no plaintext fallback.
       if(!this.encryptionSetup) {
-        this.setStatus('Sync error');new Notice('Set up encryption before enabling Sync. Existing plaintext vaults require a fresh vault and database.');return;
+        this.setStatus('Sync error');this.setupIssue('Set up encryption before enabling sync.');new Notice('Set up encryption before enabling Sync. Existing plaintext vaults require a fresh vault and database.');return;
       }
       try {
         const setup=new EncryptionSetup(binding,this.setupStorage,new ObsidianSecrets(this.app),new CouchConfiguration(this.settings,this.http()));
@@ -174,12 +193,14 @@ export default class BetterSync extends Plugin {
         const store=new StateStore(state,async snapshot=>{this.state=snapshot;await this.persist();});
         this.engine=new SyncEngine(vault,remote,store,{
           status:s=>this.setStatus(s),notice:m=>{new Notice(m,8000);},
+          activity:event=>this.activity.accept(event),
           confirm:direction=>confirmSetup(this.app,direction),
           log:(event,path)=>console.debug('[BetterSync]',event,path??'')
         });
+        this.setupIssue();
         await this.engine.start();
         if(!this.unloaded) this.timer=window.setInterval(()=>void this.engine?.tick(),3000);
-      }catch(error){this.setStatus('Sync error');new Notice(error instanceof Error?error.message:'Could not start sync.');}
+      }catch(error){this.setStatus('Sync error');this.setupIssue(activityFailure(error));new Notice(error instanceof Error?error.message:'Could not start sync.');}
     });
     this.config=operation.catch(()=>{this.setStatus('Sync error');});return this.config;
   }
@@ -191,6 +212,6 @@ export default class BetterSync extends Plugin {
   async retry():Promise<void> {if(this.settings.enabled) {if(this.engine)await this.engine.retry();else await this.configure({});}}
   private async resume():Promise<void> {if(this.settings.enabled) {if(this.engine)await this.engine.tick();else await this.configure({});}}
   onunload():void {
-    this.unloaded=true;if(this.timer!==undefined) window.clearInterval(this.timer);void this.engine?.stop();
+    this.unloaded=true;this.activityModal?.close();if(this.timer!==undefined) window.clearInterval(this.timer);void this.engine?.stop();
   }
 }

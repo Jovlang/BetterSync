@@ -125,6 +125,7 @@ export class EncryptedRemote implements Remote {
         if(!bytes)invalid();
         const source=bytes;
         await ctx.stage(path,'chunk-network',source.byteLength);
+        ctx.progress?.(path,Math.min(op.next*CHUNK_BYTES,source.byteLength),source.byteLength);
         let checkpoint=performance.now(),checkpointNext=op.next;
         for(let first=op.next;first<op.metadata.chunks.length;first+=2) {
           if(ctx.stopped()) {await ctx.store.save();return {kind:'changed'};}
@@ -146,6 +147,7 @@ export class EncryptedRemote implements Remote {
             if(contiguous){op.next++;this.diagnostics.uploadedChunks++;}
             ctx.log(`transfer upload stage=chunk-confirmed bytes=${op.metadata.size} chunk=${op.next}/${op.metadata.chunks.length}`);
           }
+          ctx.progress?.(path,Math.min(op.next*CHUNK_BYTES,source.byteLength),source.byteLength);
           if(failed) {
             if(op.next>checkpointNext)await ctx.store.save();
             throw failure;
@@ -223,6 +225,7 @@ export class EncryptedRemote implements Remote {
       h=sha256.create().update(new Uint8Array(bytes));s.offset=m.size;s.prefixHash=bytesToHex(h.clone().digest());await ctx.store.save();
     }
     await ctx.stage(doc.path,'chunk-network',m.size);
+    ctx.progress?.(doc.path,s.offset,m.size);
     let checkpoint=performance.now(),checkpointNext=s.next;
     for(let first=s.next;first<m.chunks.length;first+=2) {
       if(ctx.stopped())throw new SyncFailure('temporary','Transfer suspended.');
@@ -240,6 +243,7 @@ export class EncryptedRemote implements Remote {
         s.next++;s.offset+=bytes.byteLength;s.prefixHash=bytesToHex(h.clone().digest());
         this.diagnostics.downloadedChunks++;ctx.log(`transfer download stage=chunk-staged bytes=${m.size} chunk=${s.next}/${m.chunks.length}`);
       }
+      ctx.progress?.(doc.path,s.offset,m.size);
       if(s.next-checkpointNext>=4||performance.now()-checkpoint>=1000||s.next===m.chunks.length) {await ctx.store.save();await ctx.cooperate(doc.path);checkpoint=performance.now();checkpointNext=s.next;}
     }
     if(s.offset!==m.size||bytesToHex(h.digest())!==m.hash)invalid();

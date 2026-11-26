@@ -71,7 +71,9 @@ export class TransferSafety {
       if(attempt.paused)this.notice();
       if(error instanceof SyncFailure && error.kind==='configuration')throw error;
       // A per-attachment failure must not abort unrelated uploads or feed rows.
-      throw new SyncFailure('data','Attachment transfer failed. Pending work is retained.');
+      const failure=new SyncFailure('data','Attachment transfer failed. Pending work is retained.');
+      failure.cause=error;
+      throw failure;
     } finally {this.current=undefined;}
   }
 }

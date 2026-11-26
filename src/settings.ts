@@ -71,6 +71,7 @@ export class BetterSyncSettings extends PluginSettingTab {
       .addButton(b=>b.setButtonText('Set up encryption').onClick(async()=>{b.setDisabled(true);try{await this.plugin.setupEncryption();}finally{b.setDisabled(false);this.display();}}));
     new Setting(containerEl).addButton(b=>b.setButtonText('Show recovery code').onClick(()=>void this.plugin.showRecoveryCode()));
     this.statusEl=new Setting(containerEl).setName('Status').descEl;this.showStatus(this.plugin.status);
-    new Setting(containerEl).addButton(button=>button.setButtonText('Retry').onClick(()=>void this.plugin.retry()));
+    new Setting(containerEl).addButton(button=>button.setButtonText('Sync activity').onClick(()=>this.plugin.showActivity()))
+      .addButton(button=>button.setButtonText('Retry').onClick(()=>void this.plugin.retry()));
   }
 }

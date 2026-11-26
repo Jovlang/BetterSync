@@ -7,7 +7,7 @@ import {SyncEngine} from '../src/sync-engine';
 import {freshState,StateStore} from '../src/local-state';
 import {syncPath} from '../src/paths';
 import type {Http,Connection} from '../src/couch-client';
-import type {LocalSyncState,SyncStatus} from '../src/types';
+import type {EngineUI,LocalSyncState,SyncStatus} from '../src/types';
 export const connection={url:'https://schema5.invalid',database:'synthetic',username:'synthetic',password:'synthetic'};
 type Doc={_id:string;_rev?:string;[key:string]:unknown};
 export class Schema5Wire {
@@ -46,12 +46,12 @@ export async function fixture() {
   await new CouchConfiguration(connection,wire.http).createConfiguration(await createConfiguration(key));
   return {code,key,wire,remote:()=>EncryptedRemote.connect(connection,wire.http,key,syncPath)};
 }
-export async function device(remote:EncryptedRemote,configDir='.obsidian') {
+export async function device(remote:EncryptedRemote,configDir='.obsidian',activity?:EngineUI['activity']) {
   const host=await diskHost(configDir);let disk=freshState(remote.stateBinding),engine:SyncEngine,status:SyncStatus='Synced';
   let failSave:((state:LocalSyncState)=>boolean)|undefined;const logs:string[]=[],notices:string[]=[];
   const boot=()=>{engine=new SyncEngine(host.vault,remote,new StateStore(structuredClone(disk),async s=>{
     if(failSave?.(s))throw new Error('simulated durable write failure');disk=structuredClone(s);
-  }),{status:s=>{status=s;},notice:s=>notices.push(s),log:s=>logs.push(s),confirm:async d=>d});};boot();
+  }),{activity,status:s=>{status=s;},notice:s=>notices.push(s),log:s=>logs.push(s),confirm:async d=>d});};boot();
   return {host,remote,logs,notices,get disk(){return disk;},get engine(){return engine;},get status(){return status;},
     failSave:(f:typeof failSave)=>{failSave=f;},restart:async()=>{await engine.stop();boot();await engine.start();},
     close:async()=>{await engine.stop();await host.cleanup();}};

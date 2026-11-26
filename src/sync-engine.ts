@@ -3,6 +3,7 @@ import {preserveConflict} from './conflict-handler';
 import {validateDocument} from './couch-client';
 import {StateStore, PersistenceFailure} from './local-state';
 import {TransferSafety} from './transfer-safety';
+import {activityFailure, type ActivityDirection} from './sync-activity';
 import {SyncFailure, type FileDocument, type Remote, type VaultClient, type EngineUI, type Content} from './types';
 
 export class SyncEngine {
@@ -18,10 +19,31 @@ export class SyncEngine {
   constructor(private vault:VaultClient, private remote:Remote, private store:StateStore, private ui:EngineUI) {
     this.transfers=new TransferSafety(store,ui,!!remote.uploadLocal);
     remote.observeTransfer?.((stage,size)=>this.transfers.stage(stage,size));
-    remote.bindTransfer?.({vault,store,stage:(path,stage,size)=>this.transfers.stageFor(path,stage,size),
+    remote.bindTransfer?.({vault,store,stage:(path,stage,size)=>this.stageFor(path,stage,size),
+      progress:(path,done,total)=>ui.activity?.({type:'progress',path,done,total}),
       cooperate:path=>this.cooperate(path),stopped:()=>this.stopped,log:event=>ui.log(event)});
     if(remote.stateBinding && store.state.binding!==remote.stateBinding)
       throw new SyncFailure('configuration','Sync progress belongs to a different vault, key or database.');
+  }
+  private stageFor(path:string,stage:string,size?:number):Promise<void> {
+    if(stage==='local-write')this.ui.activity?.({type:'stage',path});
+    return this.transfers.stageFor(path,stage,size);
+  }
+  private async track(path:string,direction:ActivityDirection,operation:()=>Promise<boolean|undefined>):Promise<void> {
+    this.ui.activity?.({type:'start',path,direction});
+    try {
+      const result=await operation();
+      this.ui.activity?.({type:'end',path,direction,completed:result===true,pending:result===undefined});
+    } catch(error) {
+      const attempt=this.store.state.transfers?.[path];
+      const waiting=error instanceof SyncFailure && error.message==='Attachment retry is waiting for backoff.';
+      this.ui.activity?.({type:'end',path,direction,failure:waiting?undefined:activityFailure(error,attempt),pending:waiting});
+      throw error;
+    }
+  }
+  private showRejected():void {
+    const count=Object.keys(this.store.state.rejected??{}).length;
+    this.ui.activity?.({type:'issue',scope:'records',failure:count? 'Some incoming changes could not be validated or applied. Check the sync setup.':undefined});
   }
   private ownsRecord(id:string):boolean {return this.remote.ownsRecord?.(id)??id.startsWith('file:');}
   private ownsPath(path:string):boolean {return this.vault.isAllowed(path);}
@@ -30,6 +52,10 @@ export class SyncEngine {
     this.stopped = false;
     await this.dropExcludedState();
     await this.transfers.recover();
+    for(const [path,attempt] of Object.entries(this.store.state.transfers??{})) {
+      if(attempt.paused)this.ui.activity?.({type:'end',path,direction:attempt.direction==='download'&&(this.store.state.incoming[path]?.doc.deleted||path.endsWith('/'))?'apply':attempt.direction,
+        failure:activityFailure(undefined,attempt)});
+    }
     for (const p of [...(await this.vault.listFiles()),...Object.keys(this.store.state.files),...Object.keys(this.store.state.transfers??{}),...Object.keys(this.store.state.outgoing??{})]) if(this.ownsPath(p)) this.dirty.add(p);
     await this.tick();
   }
@@ -107,6 +133,7 @@ export class SyncEngine {
         if((changes.sourceRows??changes.results.length)<200) {caughtUp=true;break;}
       }
       // Drain the remote backlog before authorizing writes, including foreign-protocol checks.
+      this.showRejected();
       if(!caughtUp) {this.ui.status(failed?'Sync error':'Syncing…');return;}
       this.mayPoll=true;
       for(const path of [...this.dirty]) {
@@ -123,11 +150,13 @@ export class SyncEngine {
           this.ui.log('could not upload local note');
         }
       }
+      this.ui.activity?.({type:'issue',scope:'cycle'});
       this.ui.status(failed || Object.keys(this.store.state.rejected??{}).length || Object.keys(this.store.state.transfers??{}).length || Object.keys(this.store.state.incoming).length ? 'Sync error' : this.hadConflict ? 'Conflict' : this.dirty.size ? 'Syncing…' : 'Synced');
     } catch(error) {
       const failure=error instanceof SyncFailure ? error : new SyncFailure('data','Could not sync changes. Retry to continue.');
       if(failure.kind==='configuration') {this.blocked=true;this.ui.notice(failure.message);}
       this.ui.status(failure.kind==='temporary'?'Offline':'Sync error');
+      this.ui.activity?.({type:'issue',scope:'cycle',failure:activityFailure(error)});
       this.ui.log('sync attempt failed');
     }
   }
@@ -185,12 +214,17 @@ export class SyncEngine {
       const local=(await this.vault.listFiles()).filter(path=>this.ownsPath(path));
       if(local.length && hasRemote) {
         this.blocked=true;this.ui.status('Sync error');
+        this.ui.activity?.({type:'issue',scope:'setup',failure:'Both this device and the server already contain files. First-time merging is not supported.'});
         this.ui.notice('This device and the server both already contain files. Automatic first-time merging is not supported yet.');return false;
       }
       if(local.length || hasRemote) {
         const direction=local.length?'upload':'download';
         const choice=await this.ui.confirm(direction);
-        if(choice!==direction || this.stopped) {this.blocked=true;this.ui.status('Sync error');return false;}
+        if(choice!==direction || this.stopped) {
+          this.blocked=true;this.ui.status('Sync error');
+          if(!this.stopped)this.ui.activity?.({type:'issue',scope:'setup',failure:'Initial sync was not confirmed. Select Retry to review it again.'});
+          return false;
+        }
         state.setup=direction;
         await this.store.save();
       }
@@ -198,6 +232,7 @@ export class SyncEngine {
     // Persist setup before any file transfer. Interrupted setup resumes conservatively.
     state.initialized=true;
     await this.store.save();
+    this.ui.activity?.({type:'issue',scope:'setup'});
     return true;
   }
   private async receive(doc:FileDocument):Promise<void> {
@@ -208,7 +243,9 @@ export class SyncEngine {
     if(own) {
       state.files[doc.path]={rev:doc._rev!,hash:own.digest};
       delete state.incoming[doc.path];if(state.outgoing)delete state.outgoing[doc.path];
-      await this.store.save();this.dirty.add(doc.path);return;
+      await this.store.save();this.dirty.add(doc.path);
+      this.ui.activity?.({type:'end',path:doc.path,direction:doc.deleted||doc.path.endsWith('/')?'apply':'download'});
+      return;
     }
     if(state.incoming[doc.path]?.doc._rev!==doc._rev)state.incoming[doc.path]={doc,expected:base?.hash ?? null};
     await this.store.save();
@@ -220,7 +257,11 @@ export class SyncEngine {
   private async finishIncoming(path:string):Promise<void> {
     const incoming=this.store.state.incoming[path]?.doc;
     const size=incoming?.manifest?incoming.size:incoming?.encrypted?._attachments?.content.length;
-    return this.transfers.run(path,'download',()=>this.applyIncoming(path),size===undefined?undefined:incoming?.manifest?size:size-16);
+    if(!incoming)return;
+    return this.track(path,incoming.deleted||path.endsWith('/')?'apply':'download',async()=>{
+      await this.transfers.run(path,'download',()=>this.applyIncoming(path),size===undefined?undefined:incoming.manifest?size:size-16);
+      return true;
+    });
   }
   private async applyIncoming(path:string):Promise<void> {
     // Bounded diagnostic stages: never log the path, payload, raw exception or key.
@@ -270,7 +311,7 @@ export class SyncEngine {
           this.ui.log('conflict detected');
         }
         stage='local-write';
-        await this.transfers.stage(stage);
+        await this.stageFor(path,stage);
         if(await this.vault.compareAndSet(path,current,desired,doc.mtime)) {
           stage='baseline-save';
           await this.accept(doc,desiredHash);this.ui.log('remote write applied');return;
@@ -291,10 +332,14 @@ export class SyncEngine {
     await this.store.save();
   }
   private async push(path:string):Promise<void> {
-    const size=await this.vault.fileSize?.(path);
-    return this.transfers.run(path,'upload',()=>this.pushContent(path),size);
+    return this.track(path,'upload',async()=>{
+      const size=await this.vault.fileSize?.(path);
+      let result:boolean|undefined;
+      await this.transfers.run(path,'upload',async()=>{result=await this.pushContent(path);},size);
+      return result;
+    });
   }
-  private async pushContent(path:string):Promise<void> {
+  private async pushContent(path:string):Promise<boolean|undefined> {
     const base=this.store.state.files[path];
     if(this.remote.uploadLocal) {
       const result=await this.remote.uploadLocal(path,base);
@@ -306,14 +351,15 @@ export class SyncEngine {
         await this.store.save();
         // Do not retain the uploaded buffer while checking edits made during HTTP.
         this.dirty.add(path);
+        return true;
       }
-      return;
+      return result.kind==='unchanged'?false:undefined;
     }
     const sourceMtime=path.endsWith('/') ? undefined : await this.vault.modificationTime?.(path);
     const content=await this.vault.read(path);
     await this.transfers.stage('baseline-hash',content instanceof ArrayBuffer?content.byteLength:undefined);
     const digest=await hashAsync(content);
-    if(digest===(base?.hash ?? null)) return;
+    if(digest===(base?.hash ?? null)) return false;
     if(!path.endsWith('/') && sourceMtime!==await this.vault.modificationTime?.(path)) {
       this.dirty.add(path);
       return;
@@ -341,6 +387,7 @@ export class SyncEngine {
       await this.store.save();
       if(await hashAsync(await this.vault.read(path))!==digest) this.dirty.add(path);
       this.ui.log('remote document updated');
+      return true;
     } catch(error) {
       if(error instanceof SyncFailure && error.kind==='conflict') {
         const current=await this.remote.getDocument(path);

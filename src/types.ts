@@ -45,6 +45,7 @@ export type UploadResult = {kind:'unchanged'}|{kind:'changed'}|{kind:'conflict';
 export interface TransferContext {
   vault:VaultClient;store:import('./local-state').StateStore;
   stage(path:string,stage:string,size?:number):Promise<void>;
+  progress?(path:string,done:number,total:number):void;
   cooperate(path:string):Promise<void>;stopped():boolean;
   log(event:string):void;
 }
@@ -74,6 +75,7 @@ export interface VaultClient {
 export type SyncStatus = 'Synced' | 'Syncing…' | 'Offline' | 'Conflict' | 'Sync error';
 export type SetupChoice = 'upload' | 'download' | 'cancel';
 export interface EngineUI {
+  activity?(event:import('./sync-activity').ActivityEvent):void;
   status(status: SyncStatus): void;
   notice(message: string): void;
   confirm(direction: 'upload' | 'download'): Promise<SetupChoice>;

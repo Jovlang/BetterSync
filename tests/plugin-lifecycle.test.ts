@@ -10,7 +10,7 @@ async function plugin() {
     }
   }]});
   const {default:Plugin}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0]!.text).toString('base64'));
-  const p=new Plugin();p.app={};p.statusEl={setText(){}};p.settingsTab={showStatus(){}};
+  const p=new Plugin();p.app={};p.statusEl={};p.statusButton={setText(){}};p.settingsTab={showStatus(){}};
   p.saveData=async()=>{};
   return p;
 }

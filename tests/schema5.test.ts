@@ -1,4 +1,5 @@
 import {test} from 'node:test';
+import type {EngineUI} from '../src/types';
 import assert from 'node:assert/strict';
 import {hkdfSync,createDecipheriv,createHash} from 'node:crypto';
 import {readFile,rm,utimes,mkdir} from 'node:fs/promises';
@@ -49,6 +50,27 @@ for(const size of [0,1,INLINE_FILE_BYTES-1,INLINE_FILE_BYTES,INLINE_FILE_BYTES+1
     } finally {await a.close();await b.close();}
   });
 }
+
+test('chunked transfers publish plaintext byte progress to local activity',async()=>{
+  const f=await fixture(),size=2*CHUNK_BYTES+17;
+  const uploads:number[]=[],downloads:number[]=[];
+  const observe=(values:number[]):EngineUI['activity']=>event=>{
+    if(event.type==='progress'&&event.path==='progress.bin') {
+      assert.equal(event.total,size);
+      values.push(event.done);
+    }
+  };
+  const a=await device(await f.remote(),undefined,observe(uploads));
+  const b=await device(await f.remote(),undefined,observe(downloads));
+  try {
+    await a.engine.start();await b.engine.start();
+    await a.host.seed('progress.bin',new Uint8Array(size).fill(31));
+    await a.engine.changed('progress.bin');await settle(a,b);
+    assert.deepEqual(uploads,[0,2*CHUNK_BYTES,size]);
+    assert.deepEqual(downloads,[0,2*CHUNK_BYTES,size]);
+    assert.equal(a.status,'Synced');assert.equal(b.status,'Synced');
+  } finally {await a.close();await b.close();}
+});
 
 test('88 MiB uses real chunks and staged three-client recovery, lost acknowledgements, and small-file fairness',async()=>{
   const f=await fixture(),a=await device(await f.remote()),b=await device(await f.remote()),c=await device(await f.remote());

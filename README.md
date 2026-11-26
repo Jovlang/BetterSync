@@ -2,7 +2,7 @@
 
 Small Obsidian plugin for synchronizing vault files and directories through one self-hosted CouchDB database. Designed for desktop, laptop and phone, with no master client and no device registry.
 
-**Status: 0.5.6 schema-5 performance prerelease; full device acceptance remains open.** An 88 MB MOV upload from iPhone to PC was confirmed on 0.5.0, and an approximately 83 MB MKV download to iPhone eventually completed on 0.5.1. The bounded paired uploads from 0.5.5 remain unchanged; this update corrects their sanitized upload-progress diagnostics so an out-of-order successful chunk is counted only once after its preceding gap is authenticated. Existing 0.5.x installations keep their database and local state; earlier schema-4 installations still require a fresh test vault/database. See [release notes](docs/RELEASE-0.5.6.md), [performance results](docs/PERFORMANCE-0.5.md) and [remaining device checks](docs/CHUNKED-TRANSFER-VERIFICATION.md).
+**Status: 0.5.7 schema-5 prerelease; full device acceptance remains open.** This preview adds a Sync activity panel without changing the sync protocol or local state format. Existing 0.5.x installations keep their database and local state; older schema-4 installations still require a fresh test vault and database. See [release notes](docs/RELEASE-0.5.7.md), [performance results](docs/PERFORMANCE-0.5.md) and [remaining device checks](docs/CHUNKED-TRANSFER-VERIFICATION.md).
 
 ## Install the test build
 
@@ -27,6 +27,8 @@ A concurrent edit preserves the local text in a normal `*.sync-conflict-<client>
 Regular non-dotfiles (including attachments and Canvas) and directories (including empty ones) synchronize. Any file or directory whose name starts with `.` is excluded at every depth, as is the active Obsidian configuration folder when it has a custom non-dot name. This includes `.obsidian`, the local recovery directory `.trash`, and files such as `.env` or `folder/.secret`. The fixed per-file limit is 200 MiB (209,715,200 bytes); larger files stay local and report a sync error. Settings, plugins, themes and other dotfiles stay local. Remote file deletion uses the vault's local trash; empty directory tombstones remove only the empty directory itself.
 
 The normal states are **Synced**, **Syncing…**, **Offline**, **Conflict** and **Sync error**. Use **Retry** after fixing a connection problem. Connection errors stop automatic aggressive retries; temporary failures are retried. The Conflict indication stays visible for the current plugin session after a conflict occurs; conflict copies remain ordinary files after restart.
+
+Open **Sync activity** from the status bar, BetterSync settings, or the command palette to see the files currently syncing, transfer progress when available, and unresolved failures with retry guidance. The latest 50 activity entries are kept in memory only on this device and cleared when the plugin reloads.
 
 An attachment interrupted during a risky read or local write, or repeatedly failing, pauses with **Sync error** while other files continue. A checkpointed network interruption gets one automatic startup recovery attempt; another interruption pauses it. Its local file remains untouched by the pause. Use **Retry** to attempt it again; reopening the app or restoring connectivity does not clear a safety pause. Ordinary completed offline failures resume automatically with bounded backoff.
 
