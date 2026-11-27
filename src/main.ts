@@ -2,14 +2,14 @@ import {Notice, Modal, Plugin, requestUrl, TFolder} from 'obsidian';
 import {CouchHttp} from './couch-http';
 import {withTimeout} from './http';
 import {freshState, StateStore} from './local-state';
-import {StateFiles, StateRecoveryRequired, stateReference, type StateReference} from './state-files';
+import {StateFiles, StateRecoveryRequired, stateReference, validState, type StateReference} from './state-files';
 import {hash} from './paths';
 import {defaults, BetterSyncSettings, confirmSetup, encryptionCode, type Settings} from './settings';
 import {SyncEngine} from './sync-engine';
 import {ObsidianVault} from './vault-client';
 import type {LocalSyncState, SyncStatus} from './types';
 import {PersistentSetupStorage} from './setup-storage';
-import {EncryptionSetup,generateRecoveryCode,type SetupIntent} from './encryption-setup';
+import {EncryptionSetup,generateRecoveryCode,validateConfiguration,type SetupIntent} from './encryption-setup';
 import {ObsidianSecrets} from './obsidian-secrets';
 import {CouchConfiguration} from './couch-configuration';
 import {EncryptedRemote} from './encrypted-remote';
@@ -17,6 +17,23 @@ import {storeCredential} from './credential-storage';
 import {SyncActivity, activityFailure} from './sync-activity';
 import {SyncActivityModal} from './sync-activity-modal';
 interface Saved {settings:Settings; stateReference?:StateReference; encryptionSetup?:SetupIntent; state?:LocalSyncState}
+const record=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
+const nonempty=(value:unknown)=>typeof value==='string'&&value.length>0;
+function validSaved(value:unknown):value is Saved {
+  if(!record(value)||!record(value.settings))return false;
+  const {settings,stateReference:ref,state,encryptionSetup:setup}=value;
+  if(!['url','database','username','password'].every(k=>typeof settings[k]==='string')
+    ||typeof settings.enabled!=='boolean'||(settings.passwordSecret!==undefined&&!nonempty(settings.passwordSecret)))return false;
+  if(ref!==undefined&&(!record(ref)||!nonempty(ref.binding)||!nonempty(ref.clientId)))return false;
+  if(state!==undefined&&!validState(state))return false;
+  if(setup!==undefined) {
+    if(!record(setup)||setup.version!==1||!nonempty(setup.binding)||!nonempty(setup.vault)||!nonempty(setup.secretName)
+      ||(setup.phase!=='prepared'&&setup.phase!=='ready')||(setup.operation!=='create'&&setup.operation!=='join'))return false;
+    if(setup.configuration!==undefined)validateConfiguration(setup.configuration);
+    else if(setup.phase==='prepared'&&setup.operation==='create')return false;
+  }
+  return true;
+}
 export default class BetterSync extends Plugin {
   settings:Settings={...defaults};
   status:SyncStatus='Synced';
@@ -39,7 +56,24 @@ export default class BetterSync extends Plugin {
   private unloaded=false;
   private transport?:ReturnType<typeof withTimeout>;
   async onload():Promise<void> {
-    const saved=await this.loadData() as Saved|null;
+    let saved:Saved|null=null;
+    try {
+      const raw:unknown=await this.loadData();
+      if(raw===null) {
+        // Some hosts return null for unreadable data as well as a missing file.
+        if(await this.app.vault.adapter.exists(this.pluginDir()+'/data.json')||await this.progressFiles().hasArtifacts())
+          throw new Error();
+      } else {
+        if(!validSaved(raw))throw new Error();
+        saved=raw;
+      }
+    } catch {
+      if(this.unloaded)return;
+      this.status='Sync error';
+      new Notice('BetterSync paused: configuration (data.json) is missing, invalid, or could not be read. Keep the local configuration and progress files for recovery, then reload BetterSync after restoring the configuration.',0);
+      return;
+    }
+    if(this.unloaded)return;
     this.settings={...defaults,...saved?.settings};this.state=this.legacyState=saved?.state;
     this.stateRef=saved?.stateReference;
     this.encryptionSetup=saved?.encryptionSetup;
@@ -84,9 +118,11 @@ export default class BetterSync extends Plugin {
   private setupIssue(failure?:string):void {
     this.activity.accept({type:'issue',scope:'setup',failure});
   }
+  private pluginDir():string {
+    return this.manifest.dir??this.app.vault.configDir+'/plugins/'+this.manifest.id;
+  }
   private progressFiles():StateFiles {
-    const dir=this.manifest.dir??this.app.vault.configDir+'/plugins/'+this.manifest.id;
-    return this.stateFiles??=new StateFiles(this.app.vault.adapter,dir);
+    return this.stateFiles??=new StateFiles(this.app.vault.adapter,this.pluginDir());
   }
   private persist(setup?:SetupIntent,reference?:StateReference):Promise<void> {
     const snapshot:Saved={settings:{...this.settings}};

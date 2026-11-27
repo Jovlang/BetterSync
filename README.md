@@ -2,7 +2,7 @@
 
 Small Obsidian plugin for synchronizing vault files and directories through one self-hosted CouchDB database. Designed for desktop, laptop and phone, with no master client and no device registry.
 
-**Status: 0.5.9 schema-5 prerelease; full device acceptance remains open.** Sync activity now distinguishes local checks from uploads and outgoing deletions. Existing 0.5.x installations keep their database; older schema-4 installations still require a fresh test vault and database. See [release notes](docs/RELEASE-0.5.9.md) and [remaining device checks](docs/CHUNKED-TRANSFER-VERIFICATION.md).
+**Status: 0.5.10 schema-5 prerelease; full device acceptance remains open.** Startup now stops before setup or sync when local configuration needs recovery. Existing 0.5.x installations keep their database; older schema-4 installations still require a fresh test vault and database. See [release notes](docs/RELEASE-0.5.10.md) and [remaining device checks](docs/CHUNKED-TRANSFER-VERIFICATION.md).
 
 ## Install the test build
 
@@ -37,6 +37,8 @@ An attachment interrupted during a risky read or local write, or repeatedly fail
 BetterSync migrates older embedded progress out of `data.json` after verifying the new snapshot; this does not change the CouchDB schema. `data.json` keeps settings, secret references, encryption setup and a small reference to local sync progress. Frequent saves touch only `sync-state.json` and its previous verified snapshot, `sync-state.backup.json`, in the same plugin directory. Do not commit or copy any of these files between installations.
 
 Obsidian's portable adapter does not guarantee atomic replacement or power-loss durability. If the current snapshot is missing or damaged, BetterSync pauses rather than using an older checkpoint or assuming an empty baseline. Keep both files and the vault contents for recovery; do not replace the current snapshot with the backup blindly. Older plugin builds cannot read the split progress after migration.
+
+If `data.json` is unreadable or invalid, or is missing while either local progress file remains, BetterSync pauses before setup or sync. Preserve all local recovery files. If you have a known-good configuration backup from this same installation, restore it before reloading BetterSync; do not copy configuration from another device or delete progress files to bypass the warning.
 
 ## Server requirements
 

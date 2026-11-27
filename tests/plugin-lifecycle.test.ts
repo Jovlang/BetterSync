@@ -14,6 +14,52 @@ async function plugin() {
   p.saveData=async()=>{};
   return p;
 }
+
+test('startup stops before registering setup or writing when configuration needs recovery',async()=>{
+  const dir='test-profile/plugins/bettersync';
+  const cases=[
+    {file:'sync-state.json',raw:null},
+    {file:'sync-state.backup.json',raw:null},
+    {file:'data.json',raw:null},
+    {raw:{}},
+    {raw:{settings:{url:'',database:'',username:'',password:'',enabled:'false'}}},
+    {raw:{settings:{url:'',database:'',username:'',password:'',enabled:false},stateReference:{binding:'test'}}},
+    {raw:null,probeFails:true},
+    {raw:null,loadFails:true},
+  ];
+  const p=await plugin();
+  p.manifest={id:'bettersync',dir};
+  p.addStatusBarItem=()=>assert.fail('Startup must not register normal setup UI');
+  p.saveData=async()=>assert.fail('Startup must not overwrite configuration');
+  for(const {file,raw,probeFails,loadFails} of cases) {
+    p.app.vault={adapter:{exists:async(path:string)=>{
+      if(probeFails)throw new Error('I/O error');
+      return path===dir+'/'+file;
+    }}};
+    p.loadData=async()=>{
+      if(loadFails)throw new SyntaxError('Invalid JSON');
+      return raw;
+    };
+    p.status='Synced';
+    await p.onload();
+    assert.equal(p.status,'Sync error');
+  }
+});
+
+test('startup accepts a fresh installation and valid saved configuration',async()=>{
+  const p=await plugin();
+  p.manifest={id:'bettersync'};
+  p.app.vault={configDir:'custom-profile',adapter:{exists:async(path:string)=>{
+    assert.ok(path.startsWith('custom-profile/plugins/bettersync/'));return false;
+  }}};
+  const uiReached=new Error('normal startup reached');
+  p.addStatusBarItem=()=>{throw uiReached;};
+  for(const raw of [null,{settings:{...p.settings,url:'https://test.invalid'}}]) {
+    p.loadData=async()=>raw;
+    await assert.rejects(p.onload(),error=>error===uiReached);
+  }
+  assert.equal(p.settings.url,'https://test.invalid');
+});
 test('disabling sync stops the engine without accessing an unavailable secret store',async()=>{
   const p=await plugin();let stopped=0;
   p.settings={url:'https://test.invalid',database:'test',username:'test',password:'',passwordSecret:'bettersync-'+'a'.repeat(32),enabled:true};

@@ -13,7 +13,7 @@ const object=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==='object'&&
 const identity=(v:unknown):v is string=>typeof v==='string'&&v.length>0;
 const matches=(a:StateReference,b:StateReference)=>a.binding===b.binding&&a.clientId===b.clientId;
 export function stateReference({binding,clientId}:StateReference):StateReference {return {binding,clientId};}
-function validState(v:unknown):v is LocalSyncState {
+export function validState(v:unknown):v is LocalSyncState {
   return object(v)&&v.version===1&&identity(v.binding)&&identity(v.clientId)&&typeof v.initialized==='boolean'
     &&(v.setup===undefined||v.setup==='upload'||v.setup==='download')
     &&(typeof v.lastSequence==='string'||Number.isFinite(v.lastSequence))
@@ -46,6 +46,9 @@ export class StateFiles {
   constructor(private adapter:Storage,dir:string) {
     this.primary=dir+'/sync-state.json';
     this.backup=dir+'/sync-state.backup.json';
+  }
+  async hasArtifacts():Promise<boolean> {
+    return await this.adapter.exists(this.primary)||await this.adapter.exists(this.backup);
   }
   private async inspect(path:string) {
     if(!await this.adapter.exists(path))return {exists:false,snapshot:null};

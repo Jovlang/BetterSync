@@ -4,6 +4,8 @@ The user's Minimal Obsidian Sync specification is the project constitution. Read
 
 Use Obsidian APIs and portable HTTP. No Node/Electron dependencies in plugin runtime code. Keep credentials and note content out of logs and commits.
 
+This repository may also be a live Obsidian plugin installation. Never delete, overwrite, reset, or clean runtime configuration, sync state, or recovery files during development, testing, or builds. Never run Git clean with ignored-file removal (such as `git clean -fdx` or `git clean -fdX`) in this directory. Use an isolated test installation for destructive scenarios.
+
 For sync changes, run `npm run verify`; use three-client tests and exercise crash/offline cases. The real CouchDB wire test runs separately through `npm run test:integration` with an isolated test server. Never run it against a user's vault database.
 
 Do not report MVP acceptance complete until all ten tests in docs/ACCEPTANCE.md pass on real desktop, MacBook and iPhone clients. Preserve that distinction in release notes.
