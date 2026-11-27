@@ -49,6 +49,29 @@ test('offline delete versus newer remote edit preserves the remote edit',async()
   await a.vault.edit('test.md','new');await settle(a,c);await b.vault.edit('test.md',null);await settle(a,b,c);
   for(const d of [a,b,c])assert.equal(await d.vault.read('test.md'),'new');assert.ok(b.notices.some(n=>n.includes('conflict')));
 });
+test('startup skips absent tombstones but detects offline recreation and deletion',async()=>{
+  const {a,b,c,remote}=await three();
+  for(const path of ['historical.md','restored.md','newly-deleted.md'])await a.vault.edit(path,'original');
+  await settle(a,b,c);
+  for(const path of ['historical.md','restored.md'])await a.vault.edit(path,null);
+  await settle(a,b,c);
+  const tombstone=structuredClone(b.disk.files['historical.md']);
+  assert.equal(tombstone?.hash,null);
+  await b.engine.stop();
+  b.vault.files.set('restored.md','restored while closed');
+  b.vault.files.delete('newly-deleted.md');
+  const read=b.vault.read.bind(b.vault),reads:string[]=[];
+  b.vault.read=async path=>{reads.push(path);return read(path);};
+  const seq=remote.seq;
+  await b.restart();await settle(a,b,c);
+  assert.ok(!reads.includes('historical.md'),'an absent tombstone must not trigger a local read');
+  assert.deepEqual(b.disk.files['historical.md'],tombstone);
+  assert.equal(remote.seq,seq+2);
+  for(const d of [a,b,c]){
+    assert.equal(await d.vault.read('restored.md'),'restored while closed');
+    assert.equal(await d.vault.read('newly-deleted.md'),null);
+  }
+});
 test('a learned deletion permits intentional recreation',async()=>{
   const {a,b,c}=await three();await a.vault.edit('test.md','base');await settle(a,b,c);
   await a.vault.edit('test.md',null);await settle(a,b,c);await b.vault.edit('test.md','recreated');await settle(a,b,c);

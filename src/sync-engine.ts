@@ -57,7 +57,13 @@ export class SyncEngine {
       if(attempt.paused)this.ui.activity?.({type:'end',path,direction:attempt.direction==='download'&&(this.store.state.incoming[path]?.doc.deleted||path.endsWith('/'))?'apply':attempt.direction,
         failure:activityFailure(undefined,attempt)});
     }
-    for (const p of [...(await this.vault.listFiles()),...Object.keys(this.store.state.files),...Object.keys(this.store.state.transfers??{}),...Object.keys(this.store.state.outgoing??{})]) if(this.ownsPath(p)) this.dirty.add(p);
+    const enqueue=(path:string)=>{if(this.ownsPath(path))this.dirty.add(path);};
+    for(const path of await this.vault.listFiles())enqueue(path);
+    // Keep deletion baselines for revision checks, but only recheck them if
+    // the path is present locally again or has unfinished work below.
+    for(const [path,baseline] of Object.entries(this.store.state.files))if(baseline.hash!==null)enqueue(path);
+    for(const path of Object.keys(this.store.state.transfers??{}))enqueue(path);
+    for(const path of Object.keys(this.store.state.outgoing??{}))enqueue(path);
     await this.tick();
   }
   /** Scope reductions leave local files untouched and discard only sync-owned

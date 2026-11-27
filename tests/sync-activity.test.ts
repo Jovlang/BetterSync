@@ -81,7 +81,7 @@ test('offline is reported without assigning an unknown failure to a file',async(
   assert.equal(activity.failures.size,0);
 });
 
-test('startup checks a locally absent tombstone without showing or sending an upload',async()=>{
+test('startup creates no activity for a locally absent tombstone',async()=>{
   const path='deleted/node_modules/old.js';
   const remote=new MemoryRemote(),vault=new MemoryVault(),activity=new SyncActivity(),labels:string[]=[];
   const doc=await remote.putDocument({_id:documentId(path),schema:2,path,mtime:0,deleted:true});
@@ -93,7 +93,7 @@ test('startup checks a locally absent tombstone without showing or sending an up
   });
   let sent=false;remote.beforePut=async()=>{sent=true;};
   await engine.start();
-  assert.deepEqual(labels,['Checking: '+path]);
+  assert.deepEqual(labels,[]);
   assert.equal(sent,false);
   assert.deepEqual(activity.recent,[]);
 });
