@@ -20,6 +20,7 @@ export class SyncEngine {
     this.transfers=new TransferSafety(store,ui,!!remote.uploadLocal);
     remote.observeTransfer?.((stage,size)=>this.transfers.stage(stage,size));
     remote.bindTransfer?.({vault,store,stage:(path,stage,size)=>this.stageFor(path,stage,size),
+      sending:(path,deleted)=>this.ui.activity?.({type:'send',path,deleted}),
       progress:(path,done,total)=>ui.activity?.({type:'progress',path,done,total}),
       cooperate:path=>this.cooperate(path),stopped:()=>this.stopped,log:event=>ui.log(event)});
     if(remote.stateBinding && store.state.binding!==remote.stateBinding)
@@ -30,7 +31,7 @@ export class SyncEngine {
     return this.transfers.stageFor(path,stage,size);
   }
   private async track(path:string,direction:ActivityDirection,operation:()=>Promise<boolean|undefined>):Promise<void> {
-    this.ui.activity?.({type:'start',path,direction});
+    this.ui.activity?.({type:'start',path,direction,checking:direction==='upload'});
     try {
       const result=await operation();
       this.ui.activity?.({type:'end',path,direction,completed:result===true,pending:result===undefined});
@@ -371,6 +372,7 @@ export class SyncEngine {
     const mtime=content===null ? Date.now() : sourceMtime ?? Date.now();
     try {
       let saved:FileDocument;
+      this.ui.activity?.({type:'send',path,deleted:content===null});
       if(this.remote.writeContent) saved=await this.remote.writeContent(path,content,base?.rev,mtime);
       else {
         const binary=content!==null && !path.endsWith('/') && !path.endsWith('.md');

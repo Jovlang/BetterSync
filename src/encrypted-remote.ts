@@ -133,6 +133,7 @@ export class EncryptedRemote implements Remote {
           // Immutable chunk IDs make a fixed pair retry-safe. Settle the pair,
           // then advance only its contiguous successful prefix; a later member
           // may already exist remotely and is authenticated on the next retry.
+          ctx.sending?.(path,false);
           const pair=await Promise.allSettled(Array.from({length:Math.min(2,op.metadata.chunks.length-first)},(_,offset)=>
             this.sendChunk(op,first+offset,source)));
           let failure:unknown,failed=false,contiguous=true;
@@ -163,6 +164,7 @@ export class EncryptedRemote implements Remote {
         if(!op.prepared) {op.prepared=await sealManifest(this.crypto,op.metadata,op.salt);await ctx.store.save();}
       }
       bytes=undefined;this.release();await ctx.stage(path,'manifest-commit');
+      ctx.sending?.(path,deleted);
       try {return {kind:'accepted',doc:await this.logical(await this.wire.putManifest(op.prepared!,base?.rev)),digest};}
       catch(error) {
         if(error instanceof SyncFailure&&error.kind==='conflict') {

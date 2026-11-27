@@ -80,3 +80,34 @@ test('offline is reported without assigning an unknown failure to a file',async(
   assert.equal(statuses.at(-1),'Synced');
   assert.equal(activity.failures.size,0);
 });
+
+test('startup checks a locally absent tombstone without showing or sending an upload',async()=>{
+  const path='deleted/node_modules/old.js';
+  const remote=new MemoryRemote(),vault=new MemoryVault(),activity=new SyncActivity(),labels:string[]=[];
+  const doc=await remote.putDocument({_id:documentId(path),schema:2,path,mtime:0,deleted:true});
+  const state=freshState('test');state.initialized=true;state.lastSequence=1;
+  state.files[path]={rev:doc._rev!,hash:null};
+  const engine=new SyncEngine(vault,remote,new StateStore(state,async()=>{}),{
+    activity:event=>{activity.accept(event);for(const work of activity.active)labels.push(activityLabel(work));},
+    status:()=>{},notice:()=>{},log:()=>{},confirm:async d=>d
+  });
+  let sent=false;remote.beforePut=async()=>{sent=true;};
+  await engine.start();
+  assert.deepEqual(labels,['Checking: '+path]);
+  assert.equal(sent,false);
+  assert.deepEqual(activity.recent,[]);
+});
+
+test('a new local deletion is labeled as sending a deletion, not uploading the file',async()=>{
+  const path='note.md',remote=new MemoryRemote(),vault=new MemoryVault(),activity=new SyncActivity();
+  const engine=new SyncEngine(vault,remote,new StateStore(freshState('test'),async()=>{}),{
+    activity:event=>activity.accept(event),status:()=>{},notice:()=>{},log:()=>{},confirm:async d=>d
+  });
+  vault.onChange=p=>engine.changed(p);
+  await engine.start();
+  await vault.edit(path,'content');await engine.tick();
+  await vault.edit(path,null);
+  remote.beforePut=async()=>assert.equal(activityLabel(activity.active[0]!), 'Send deletion: '+path);
+  await engine.tick();
+  assert.equal(activity.recent[0]?.label,'Send deletion: '+path);
+});

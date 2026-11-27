@@ -46,6 +46,7 @@ export interface TransferContext {
   vault:VaultClient;store:import('./local-state').StateStore;
   stage(path:string,stage:string,size?:number):Promise<void>;
   progress?(path:string,done:number,total:number):void;
+  sending?(path:string,deleted:boolean):void;
   cooperate(path:string):Promise<void>;stopped():boolean;
   log(event:string):void;
 }

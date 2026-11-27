@@ -2,10 +2,11 @@ import {PersistenceFailure} from './local-state';
 import {PendingTransferFailure, SyncFailure, type TransferAttempt} from './types';
 
 export type ActivityDirection = 'upload' | 'download' | 'apply';
-type Work = {path: string; direction: ActivityDirection; applying?: boolean; percent?: number};
+type Work = {path: string; direction: ActivityDirection; applying?: boolean; checking?: boolean; deleting?: boolean; percent?: number};
 export type ActivityEvent =
   | ({type:'start'} & Work)
   | {type:'stage';path:string}
+  | {type:'send';path:string;deleted:boolean}
   | {type:'progress';path:string;done:number;total:number}
   | ({type:'end';completed?:boolean;failure?:string;pending?:boolean} & Work)
   | {type:'issue';scope:'setup'|'cycle'|'records';failure?:string};
@@ -28,6 +29,8 @@ export function activityFailure(error:unknown, attempt?:TransferAttempt):string 
 }
 
 export function activityLabel(work:Work):string {
+  if(work.checking)return 'Checking: '+work.path;
+  if(work.deleting)return 'Send deletion: '+work.path;
   const direction=work.applying?'apply':work.direction;
   return ({upload:'Upload',download:'Download',apply:'Apply change'})[direction]+': '+work.path;
 }
@@ -57,13 +60,14 @@ export class SyncActivity {
   accept(event:ActivityEvent) {
     if(event.type==='issue') {this.issue(event.scope,scopes[event.scope],event.failure);return;}
     if(event.type==='start') {
-      this.active.push({path:event.path,direction:event.direction});
+      this.active.push({path:event.path,direction:event.direction,checking:event.checking});
       this.revision++;return;
     }
     let index=this.active.length-1;
     for(;index>=0;index--) {
       const candidate=this.active[index]!;
-      if(candidate.path===event.path&&(event.type!=='end'||candidate.direction===event.direction))break;
+      if(candidate.path===event.path&&(event.type!=='end'||candidate.direction===event.direction)
+        &&(event.type!=='send'||candidate.direction==='upload'))break;
     }
     const work=this.active[index];
     if(event.type==='end') {
@@ -75,6 +79,8 @@ export class SyncActivity {
         this.issue(key,label);
         if(event.completed) {this.remember(label);this.revision++;}
       }
+    } else if(work && event.type==='send' && (work.checking||work.deleting!==event.deleted)) {
+      work.checking=false;work.deleting=event.deleted;this.revision++;
     } else if(work && event.type==='stage' && work.direction==='download' && !work.applying) {
       work.applying=true;this.revision++;
     } else if(work && event.type==='progress' && event.total>0) {

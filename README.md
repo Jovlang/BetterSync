@@ -2,7 +2,7 @@
 
 Small Obsidian plugin for synchronizing vault files and directories through one self-hosted CouchDB database. Designed for desktop, laptop and phone, with no master client and no device registry.
 
-**Status: 0.5.8 schema-5 prerelease; full device acceptance remains open.** This preview separates local sync progress from configuration without changing the CouchDB protocol. Existing 0.5.x installations migrate local progress on reload and keep their database; older schema-4 installations still require a fresh test vault and database. See [release notes](docs/RELEASE-0.5.8.md) and [remaining device checks](docs/CHUNKED-TRANSFER-VERIFICATION.md).
+**Status: 0.5.9 schema-5 prerelease; full device acceptance remains open.** Sync activity now distinguishes local checks from uploads and outgoing deletions. Existing 0.5.x installations keep their database; older schema-4 installations still require a fresh test vault and database. See [release notes](docs/RELEASE-0.5.9.md) and [remaining device checks](docs/CHUNKED-TRANSFER-VERIFICATION.md).
 
 ## Install the test build
 
