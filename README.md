@@ -2,7 +2,7 @@
 
 Small Obsidian plugin for synchronizing vault files and directories through one self-hosted CouchDB database. Designed for desktop, laptop and phone, with no master client and no device registry.
 
-**Status: 0.5.7 schema-5 prerelease; full device acceptance remains open.** This preview adds a Sync activity panel without changing the sync protocol or local state format. Existing 0.5.x installations keep their database and local state; older schema-4 installations still require a fresh test vault and database. See [release notes](docs/RELEASE-0.5.7.md), [performance results](docs/PERFORMANCE-0.5.md) and [remaining device checks](docs/CHUNKED-TRANSFER-VERIFICATION.md).
+**Status: 0.5.8 schema-5 prerelease; full device acceptance remains open.** This preview separates local sync progress from configuration without changing the CouchDB protocol. Existing 0.5.x installations migrate local progress on reload and keep their database; older schema-4 installations still require a fresh test vault and database. See [release notes](docs/RELEASE-0.5.8.md) and [remaining device checks](docs/CHUNKED-TRANSFER-VERIFICATION.md).
 
 ## Install the test build
 
@@ -31,6 +31,12 @@ The normal states are **Synced**, **Syncing…**, **Offline**, **Conflict** and 
 Open **Sync activity** from the status bar, BetterSync settings, or the command palette to see the files currently syncing, transfer progress when available, and unresolved failures with retry guidance. The latest 50 activity entries are kept in memory only on this device and cleared when the plugin reloads.
 
 An attachment interrupted during a risky read or local write, or repeatedly failing, pauses with **Sync error** while other files continue. A checkpointed network interruption gets one automatic startup recovery attempt; another interruption pauses it. Its local file remains untouched by the pause. Use **Retry** to attempt it again; reopening the app or restoring connectivity does not clear a safety pause. Ordinary completed offline failures resume automatically with bounded backoff.
+
+### Local sync progress
+
+BetterSync migrates older embedded progress out of `data.json` after verifying the new snapshot; this does not change the CouchDB schema. `data.json` keeps settings, secret references, encryption setup and a small reference to local sync progress. Frequent saves touch only `sync-state.json` and its previous verified snapshot, `sync-state.backup.json`, in the same plugin directory. Do not commit or copy any of these files between installations.
+
+Obsidian's portable adapter does not guarantee atomic replacement or power-loss durability. If the current snapshot is missing or damaged, BetterSync pauses rather than using an older checkpoint or assuming an empty baseline. Keep both files and the vault contents for recovery; do not replace the current snapshot with the backup blindly. Older plugin builds cannot read the split progress after migration.
 
 ## Server requirements
 

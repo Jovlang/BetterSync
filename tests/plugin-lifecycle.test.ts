@@ -37,3 +37,38 @@ test('successful migration persists a reference and omits plaintext while retain
   assert.equal(saved.settings.password,'');assert.equal(values.get(saved.settings.passwordSecret),'synthetic credential');
   assert.equal(p.settings.password,'synthetic credential');
 });
+
+test('legacy state must verify before saving configuration, and migration is repeatable',async()=>{
+  const p=await plugin();
+  const state={version:1,clientId:'test-client',binding:'test-target',initialized:true,lastSequence:14,files:{},incoming:{}};
+  const files=new Map<string,string>();
+  const dir='test-profile/plugins/bettersync';
+  const primary=dir+'/sync-state.json';
+  p.manifest={id:'bettersync',dir};
+  let unreadable=true,configFailure=true;
+  p.app.vault={adapter:{
+    exists:async(path:string)=>files.has(path),
+    read:async(path:string)=>unreadable?'':files.get(path),
+    write:async(path:string,value:string)=>{files.set(path,value);}
+  }};
+  p.settings={...p.settings,url:'https://test.invalid',enabled:false};
+  p.legacyState=state;
+  let attempts=0,saved:any={settings:p.settings,state};
+  p.saveData=async(value:unknown)=>{
+    attempts++;assert.equal(JSON.parse(files.get(primary)!).state.lastSequence,14);
+    if(configFailure)throw new Error('configuration commit failed');
+    saved=value;
+  };
+  await p.configure({});
+  assert.equal(attempts,0);assert.equal(saved.state,state);
+  unreadable=false;
+  await p.configure({});
+  assert.equal(attempts,1);assert.equal(saved.state,state);
+  configFailure=false;
+  await p.configure({});
+  assert.equal(attempts,2);assert.equal(saved.state,undefined);assert.equal(p.legacyState,undefined);
+  assert.deepEqual(saved.stateReference,{binding:state.binding,clientId:state.clientId});
+  await p.configure({});
+  await p.progressFiles().save({...state,lastSequence:15});
+  assert.equal(attempts,2);assert.equal(saved.settings.url,'https://test.invalid');
+});

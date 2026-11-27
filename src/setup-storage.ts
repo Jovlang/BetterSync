@@ -3,7 +3,7 @@ import type {SetupIntent, SetupStorage} from './encryption-setup';
 /** Adapter for the plugin's serialized persistence owner. The update callback
  * must resolve only after saveData succeeds and preserve other saved fields.
  * Keeping this callback under the plugin's existing write queue prevents lost
- * updates between setup, settings and engine checkpoints.
+ * updates between setup and settings.
  */
 export class PersistentSetupStorage implements SetupStorage {
   private tail: Promise<unknown> = Promise.resolve();

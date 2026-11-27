@@ -2,6 +2,7 @@ import {Notice, Modal, Plugin, requestUrl, TFolder} from 'obsidian';
 import {CouchHttp} from './couch-http';
 import {withTimeout} from './http';
 import {freshState, StateStore} from './local-state';
+import {StateFiles, StateRecoveryRequired, stateReference, type StateReference} from './state-files';
 import {hash} from './paths';
 import {defaults, BetterSyncSettings, confirmSetup, encryptionCode, type Settings} from './settings';
 import {SyncEngine} from './sync-engine';
@@ -15,11 +16,15 @@ import {EncryptedRemote} from './encrypted-remote';
 import {storeCredential} from './credential-storage';
 import {SyncActivity, activityFailure} from './sync-activity';
 import {SyncActivityModal} from './sync-activity-modal';
-interface Saved {settings:Settings; state?:LocalSyncState; encryptionSetup?:SetupIntent}
+interface Saved {settings:Settings; stateReference?:StateReference; encryptionSetup?:SetupIntent; state?:LocalSyncState}
 export default class BetterSync extends Plugin {
   settings:Settings={...defaults};
   status:SyncStatus='Synced';
   private state?:LocalSyncState;
+  private legacyState?:LocalSyncState;
+  private stateRef?:StateReference;
+  private stateFiles?:StateFiles;
+  private committedConfig?:string;
   private encryptionSetup?:SetupIntent;
   private setupStorage!:PersistentSetupStorage;
   private engine?:SyncEngine;
@@ -35,8 +40,11 @@ export default class BetterSync extends Plugin {
   private transport?:ReturnType<typeof withTimeout>;
   async onload():Promise<void> {
     const saved=await this.loadData() as Saved|null;
-    this.settings={...defaults,...saved?.settings};this.state=saved?.state;
+    this.settings={...defaults,...saved?.settings};this.state=this.legacyState=saved?.state;
+    this.stateRef=saved?.stateReference;
     this.encryptionSetup=saved?.encryptionSetup;
+    if(saved&&!this.legacyState)this.committedConfig=JSON.stringify({settings:saved.settings,
+      stateReference:this.stateRef,encryptionSetup:this.encryptionSetup});
     this.setupStorage=new PersistentSetupStorage(this.encryptionSetup??null,intent=>this.persist(intent));
     this.statusEl=this.addStatusBarItem();this.settingsTab=new BetterSyncSettings(this.app,this);this.addSettingTab(this.settingsTab);
     this.statusButton=this.statusEl.createEl('button',{cls:'clickable-icon'});
@@ -76,17 +84,29 @@ export default class BetterSync extends Plugin {
   private setupIssue(failure?:string):void {
     this.activity.accept({type:'issue',scope:'setup',failure});
   }
-  private persist(setup?:SetupIntent):Promise<void> {
-    const snapshot=JSON.parse(JSON.stringify({settings:this.settings,state:this.state})) as Saved;
+  private progressFiles():StateFiles {
+    const dir=this.manifest.dir??this.app.vault.configDir+'/plugins/'+this.manifest.id;
+    return this.stateFiles??=new StateFiles(this.app.vault.adapter,dir);
+  }
+  private persist(setup?:SetupIntent,reference?:StateReference):Promise<void> {
+    const snapshot:Saved={settings:{...this.settings}};
     // Passwords are runtime-only once a verified secret reference exists.
     if(snapshot.settings.passwordSecret)snapshot.settings.password='';
     const setupSnapshot=setup?structuredClone(setup):undefined;
     const next=this.writes.then(async()=>{
       // Resolve setup at execution time: a settings save queued before a setup
       // commit must not subsequently erase the newly committed intent.
-      const intent=setupSnapshot??this.encryptionSetup;
-      if(intent) snapshot.encryptionSetup=structuredClone(intent);
-      await this.saveData(snapshot);
+      const legacy=this.legacyState;
+      if(legacy)await this.progressFiles().migrate(legacy);
+      snapshot.stateReference=reference??(legacy?stateReference(legacy):this.stateRef);
+      snapshot.encryptionSetup=setupSnapshot??this.encryptionSetup;
+      const serialized=JSON.stringify(snapshot);
+      if(legacy||serialized!==this.committedConfig) {
+        await this.saveData(snapshot);
+        this.committedConfig=serialized;
+      }
+      this.legacyState=undefined;
+      this.stateRef=snapshot.stateReference;
       if(setupSnapshot) this.encryptionSetup=setupSnapshot;
     });this.writes=next.catch(()=>{});return next;
   }
@@ -119,7 +139,7 @@ export default class BetterSync extends Plugin {
   async setupEncryption():Promise<void> {
     const operation=this.config.then(async()=>{
       if(this.unloaded)return;
-      if(!this.encryptionSetup && this.state && (this.state.initialized||this.state.setup)) {
+      if(!this.encryptionSetup && (this.stateRef||this.state?.initialized||this.state?.setup)) {
         new Notice('Use a fresh local vault and empty database to move from plaintext sync to encryption.');return;
       }
       if(this.timer!==undefined){window.clearInterval(this.timer);this.timer=undefined;}
@@ -167,19 +187,26 @@ export default class BetterSync extends Plugin {
       if(this.encryptionSetup && this.encryptionSetup.binding!==binding) {
         new Notice('Encryption setup belongs to another database. Keep the same server and database for this vault.');return;
       }
-      if(!this.encryptionSetup && this.state && this.state.binding!==binding && (this.state.initialized || this.state.setup)) {
+      if(!this.encryptionSetup && ((this.stateRef&&this.stateRef.binding!==binding)
+          || (this.state&&this.state.binding!==binding&&(this.state.initialized||this.state.setup)))) {
         new Notice('This installation is already connected to another sync database. Keep the same server and database for this vault.');return;
       }
       if(this.timer!==undefined) {window.clearInterval(this.timer);this.timer=undefined;}
       await this.engine?.stop();this.engine=undefined;
       const previousSettings=this.settings;this.settings={...settings};
-      try {await this.persist();} catch(error) {this.settings=previousSettings;throw error;}
+      try {await this.persist();} catch {
+        this.settings=previousSettings;
+        this.setStatus('Sync error');this.setupIssue('Could not save BetterSync configuration or migrate sync progress. Check local storage and retry.');
+        return;
+      }
       if(!settings.enabled) {this.setStatus('Synced');return;}
       // Encrypted setup is mandatory; there is no plaintext fallback.
       if(!this.encryptionSetup) {
         this.setStatus('Sync error');this.setupIssue('Set up encryption before enabling sync.');new Notice('Set up encryption before enabling Sync. Existing plaintext vaults require a fresh vault and database.');return;
       }
       try {
+        const files=this.progressFiles();
+        const loaded=await files.load(this.stateRef);
         const setup=new EncryptionSetup(binding,this.setupStorage,new ObsidianSecrets(this.app),new CouchConfiguration(this.settings,this.http()));
         const crypto=await setup.resume();
         if(this.unloaded)return;
@@ -187,10 +214,12 @@ export default class BetterSync extends Plugin {
         vault.assertStagingSupport();
         const remote=await EncryptedRemote.connect(this.settings,this.http(),crypto,p=>vault.isAllowed(p));
         if(this.unloaded)return;
-        if(this.state&&this.state.binding!==remote.stateBinding)throw new Error('Existing sync progress cannot be reused with this encrypted vault.');
-        const state=this.state??freshState(remote.stateBinding);this.state=state;
-        await this.persist();
-        const store=new StateStore(state,async snapshot=>{this.state=snapshot;await this.persist();});
+        if(loaded&&loaded.binding!==remote.stateBinding)throw new Error('Existing sync progress cannot be reused with this encrypted vault.');
+        const state=loaded??freshState(remote.stateBinding);
+        if(!loaded)await files.save(state);
+        if(!this.stateRef)await this.persist(undefined,stateReference(state));
+        this.state=state;
+        const store=new StateStore(state,snapshot=>files.save(snapshot));
         this.engine=new SyncEngine(vault,remote,store,{
           status:s=>this.setStatus(s),notice:m=>{new Notice(m,8000);},
           activity:event=>this.activity.accept(event),
@@ -200,7 +229,7 @@ export default class BetterSync extends Plugin {
         this.setupIssue();
         await this.engine.start();
         if(!this.unloaded) this.timer=window.setInterval(()=>void this.engine?.tick(),3000);
-      }catch(error){this.setStatus('Sync error');this.setupIssue(activityFailure(error));new Notice(error instanceof Error?error.message:'Could not start sync.');}
+      }catch(error){this.setStatus('Sync error');this.setupIssue(error instanceof StateRecoveryRequired?error.message:activityFailure(error));new Notice(error instanceof Error?error.message:'Could not start sync.');}
     });
     this.config=operation.catch(()=>{this.setStatus('Sync error');});return this.config;
   }

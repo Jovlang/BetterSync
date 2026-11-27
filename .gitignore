@@ -7,3 +7,5 @@ main.js
 data.json
 *.local.json
 .DS_Store
+sync-state.json
+sync-state.backup.json
