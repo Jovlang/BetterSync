@@ -1,0 +1,95 @@
+name: Attach BRAT release assets
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to repair (leave blank to repair all published releases)
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: brat-release-assets
+  cancel-in-progress: false
+
+jobs:
+  attach:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      EVENT_NAME: ${{ github.event_name }}
+    steps:
+      - name: Verify or attach standalone plugin files
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path, PurePosixPath
+          import subprocess
+          import tempfile
+          import zipfile
+
+          required = ("manifest.json", "main.js")
+
+          def gh(*args):
+              return subprocess.check_output(["gh", *args], text=True)
+
+          def repair(tag):
+              release = json.loads(gh("release", "view", "--json", "assets,isDraft", "--", tag))
+              if release["isDraft"]:
+                  raise ValueError("not a published release")
+              assets = {asset["name"] for asset in release["assets"]}
+              missing = [name for name in required if name not in assets]
+              if not missing:
+                  print(f"{tag}: standalone assets already present", flush=True)
+                  return
+              archive = f"bettersync-{tag}.zip"
+              if archive not in assets:
+                  raise ValueError(f"missing {', '.join(missing)} and no {archive} to recover them from")
+              with tempfile.TemporaryDirectory() as directory:
+                  folder = Path(directory)
+                  gh("release", "download", "--pattern", archive, "--dir", directory, "--", tag)
+                  with zipfile.ZipFile(folder / archive) as plugin:
+                      files = {}
+                      for name in required:
+                          matches = [entry for entry in plugin.infolist()
+                                     if not entry.is_dir() and PurePosixPath(entry.filename).name == name]
+                          if len(matches) != 1:
+                              raise ValueError(f"expected exactly one {name} in {archive}")
+                          files[name] = plugin.read(matches[0])
+                      if not files["main.js"].strip():
+                          raise ValueError("main.js is empty")
+                      if json.loads(files["manifest.json"]).get("version") != tag:
+                          raise ValueError("manifest version does not match release tag")
+                      for name in missing:
+                          (folder / name).write_bytes(files[name])
+                  gh("release", "upload", "--", tag, *(str(folder / name) for name in missing))
+              print(f"{tag}: attached {', '.join(missing)}", flush=True)
+
+          tag = os.environ["RELEASE_TAG"]
+          if tag and os.environ["EVENT_NAME"] == "workflow_dispatch":
+              tags = [tag]
+          else:
+              # Reconcile all releases on publish too: Actions concurrency can
+              # replace a pending run when several releases are published together.
+              tags = gh("api", "--paginate", "repos/{owner}/{repo}/releases",
+                        "--jq", ".[] | select(.draft | not) | .tag_name").splitlines()
+              if tag and tag not in tags:
+                  tags.insert(0, tag)
+          failures = []
+          for tag in tags:
+              try:
+                  repair(tag)
+              except Exception as error:
+                  failures.append(tag)
+                  print(f"{tag}: {error}", flush=True)
+          if failures:
+              raise SystemExit(f"Failed to attach BRAT assets for {', '.join(failures)}")
+          PY
