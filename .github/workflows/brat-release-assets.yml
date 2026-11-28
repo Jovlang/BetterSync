@@ -4,10 +4,6 @@ on:
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing release tag to repair (leave blank to repair all published releases)
-        type: string
 
 permissions:
   contents: write
@@ -22,8 +18,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
-      EVENT_NAME: ${{ github.event_name }}
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
     steps:
       - name: Verify or attach standalone plugin files
         shell: bash
@@ -74,15 +69,11 @@ jobs:
               print(f"{tag}: attached {', '.join(missing)}", flush=True)
 
           tag = os.environ["RELEASE_TAG"]
-          if tag and os.environ["EVENT_NAME"] == "workflow_dispatch":
-              tags = [tag]
-          else:
-              # Reconcile all releases on publish too: Actions concurrency can
-              # replace a pending run when several releases are published together.
-              tags = gh("api", "--paginate", "repos/{owner}/{repo}/releases",
-                        "--jq", ".[] | select(.draft | not) | .tag_name").splitlines()
-              if tag and tag not in tags:
-                  tags.insert(0, tag)
+          # Reconcile all releases so a superseded pending run cannot miss a tag.
+          tags = gh("api", "--paginate", "repos/{owner}/{repo}/releases",
+                    "--jq", ".[] | select(.draft | not) | .tag_name").splitlines()
+          if tag and tag not in tags:
+              tags.insert(0, tag)
           failures = []
           for tag in tags:
               try:
